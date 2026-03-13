@@ -7,67 +7,60 @@ const mongoose = require("mongoose");
 class AutoRequestService {
   
   // 📌 नवीन यूजरसाठी FIRST AUTO REQUEST create करा - फक्त एकदाच
-  static async createFirstAutoRequestForUser(userId, amount = 1000) {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
-    try {
-      const user = await User.findById(userId).session(session);
-      if (!user) throw new Error("User not found");
-      
-      // ✅ Check if user already got first auto request
-      if (user.autoRequest?.firstRequestCreated) {
-        console.log(`⏭️ User ${user.userId} already got first auto request, skipping...`);
-        await session.abortTransaction();
-        session.endSession();
-        return null;
-      }
-      
-      const defaultQRPath = "/uploads/auto-request-qr.png";
-      
-      const expiresAt = new Date();
-      expiresAt.setMinutes(expiresAt.getMinutes() + 10);
-      
-      const scanner = await Scanner.create([{
-        user: null, // System request
-        amount: amount,
-        image: defaultQRPath,
-        status: "ACTIVE",
-        expiresAt: expiresAt,
-        isAutoRequest: true,
-        autoRequestCycle: 1,
-        createdFor: userId
-      }], { session });
-      
-      // ✅ Update user's auto request status
-      user.autoRequest = {
-        ...user.autoRequest,
-        firstRequestCreated: true,
-        firstRequestId: scanner[0]._id,
-        firstRequestAmount: amount,
-        firstRequestCreatedAt: new Date(),
-        firstRequestExpiresAt: expiresAt,
-        // ✅ Schedule next request after 30 minutes
-        nextRequestScheduledAt: new Date(Date.now() + 30 * 60 * 1000)
-      };
-      
-      await user.save({ session });
-      
-      await session.commitTransaction();
-      session.endSession();
-      
-      console.log(`✅ FIRST AUTO REQUEST created for NEW user ${user.userId}: ₹${amount} (expires: ${expiresAt.toLocaleTimeString()})`);
-      console.log(`⏰ Next request scheduled after 30 minutes at: ${new Date(Date.now() + 30 * 60 * 1000).toLocaleTimeString()}`);
-      
-      return scanner[0];
-      
-    } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
-      console.error("❌ Error creating first auto request:", error);
+static async createFirstAutoRequestForUser(userId, amount = 1000, session = null) {
+
+  const localSession = session || await mongoose.startSession();
+
+  if (!session) {
+    localSession.startTransaction();
+  }
+
+  try {
+
+    const user = await User.findById(userId).session(localSession);
+    if (!user) throw new Error("User not found");
+
+    if (user.autoRequest?.firstRequestCreated) {
       return null;
     }
+
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+
+    const scanner = await Scanner.create([{
+      user: null,
+      amount: amount,
+      image: "/uploads/auto-request-qr.png",
+      status: "ACTIVE",
+      expiresAt,
+      isAutoRequest: true,
+      autoRequestCycle: 1,
+      createdFor: userId
+    }], { session: localSession });
+
+    user.autoRequest.firstRequestCreated = true;
+    user.autoRequest.firstRequestId = scanner[0]._id;
+
+    await user.save({ session: localSession });
+
+    if (!session) {
+      await localSession.commitTransaction();
+      localSession.endSession();
+    }
+
+    return scanner[0];
+
+  } catch (error) {
+
+    if (!session) {
+      await localSession.abortTransaction();
+      localSession.endSession();
+    }
+
+    console.error(error);
+    return null;
   }
+}
   
   // 📌 SECOND AUTO REQUEST - 30 minutes नंतर
   static async createSecondAutoRequestForUser(userId, amount = 1000) {

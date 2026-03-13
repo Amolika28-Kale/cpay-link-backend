@@ -286,7 +286,7 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
 
-  email: {                    // ✅ Email field add केला
+  email: {                    
     type: String,
     required: true,
     unique: true,
@@ -309,10 +309,10 @@ const userSchema = new mongoose.Schema({
   firstDepositCompleted: { type: Boolean, default: false },
   firstAcceptCompleted: { type: Boolean, default: false },
 
-  referralCode: { type: String, unique: true },
+  referralCode: { type: String, unique: true, sparse: true },
   referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   
-  // 21-Level Referral Tree with Leg structure
+  // 21-Level Referral Tree
   referralTree: {
     level1: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     level2: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
@@ -420,13 +420,11 @@ const userSchema = new mongoose.Schema({
     leg7: { type: Boolean, default: false }
   },
 
-  // ✅ Wallet Activation Fields
   walletActivated: { type: Boolean, default: false },
   activationDate: { type: Date, default: null },
   activationExpiryDate: { type: Date, default: null },
   dailyAcceptLimit: { type: Number, default: 1000 },
   
-  // ✅ 7-Day Limit Fields
   sevenDayTotalAccepted: { type: Number, default: 0 },
   sevenDayResetDate: { type: Date, default: null },
   activationHistory: [{
@@ -437,66 +435,52 @@ const userSchema = new mongoose.Schema({
     status: { type: String, enum: ['ACTIVE', 'EXPIRED'], default: 'ACTIVE' }
   }],
   
-// models/User.js - Add this to existing schema
-
-autoRequest: {
-  // First request tracking
-  firstRequestCreated: { type: Boolean, default: false },
-  firstRequestId: { type: mongoose.Schema.Types.ObjectId, ref: "Scanner", default: null },
-  firstRequestAmount: { type: Number, default: 0 },
-  firstRequestCreatedAt: { type: Date, default: null },
-  firstRequestExpiresAt: { type: Date, default: null },
-  firstRequestCompleted: { type: Boolean, default: false },
-  firstRequestCompletedAt: { type: Date, default: null },
-  
-  // Second request tracking (30 minutes later)
-  secondRequestCreated: { type: Boolean, default: false },
-  secondRequestId: { type: mongoose.Schema.Types.ObjectId, ref: "Scanner", default: null },
-  secondRequestAmount: { type: Number, default: 0 },
-  secondRequestCreatedAt: { type: Date, default: null },
-  secondRequestExpiresAt: { type: Date, default: null },
-  secondRequestCompleted: { type: Boolean, default: false },
-  secondRequestCompletedAt: { type: Date, default: null },
-  
-  // Schedule tracking
-  nextRequestScheduledAt: { type: Date, default: null },
-  autoRequestCompleted: { type: Boolean, default: false },
-  
-  // Stats
-  totalAutoRequests: { type: Number, default: 0 },
-  autoRequestsAccepted: { type: Number, default: 0 },
-  currentRequestId: { type: mongoose.Schema.Types.ObjectId, ref: "Scanner", default: null }
-}
+  autoRequest: {
+    firstRequestCreated: { type: Boolean, default: false },
+    firstRequestId: { type: mongoose.Schema.Types.ObjectId, ref: "Scanner", default: null },
+    firstRequestAmount: { type: Number, default: 0 },
+    firstRequestCreatedAt: { type: Date, default: null },
+    firstRequestExpiresAt: { type: Date, default: null },
+    firstRequestCompleted: { type: Boolean, default: false },
+    firstRequestCompletedAt: { type: Date, default: null },
+    
+    secondRequestCreated: { type: Boolean, default: false },
+    secondRequestId: { type: mongoose.Schema.Types.ObjectId, ref: "Scanner", default: null },
+    secondRequestAmount: { type: Number, default: 0 },
+    secondRequestCreatedAt: { type: Date, default: null },
+    secondRequestExpiresAt: { type: Date, default: null },
+    secondRequestCompleted: { type: Boolean, default: false },
+    secondRequestCompletedAt: { type: Date, default: null },
+    
+    nextRequestScheduledAt: { type: Date, default: null },
+    autoRequestCompleted: { type: Boolean, default: false },
+    
+    totalAutoRequests: { type: Number, default: 0 },
+    autoRequestsAccepted: { type: Number, default: 0 },
+    currentRequestId: { type: mongoose.Schema.Types.ObjectId, ref: "Scanner", default: null }
+  }
 
 }, { timestamps: true });
 
-// Hash PIN before saving
-userSchema.pre('save', async function (next) {
+userSchema.pre('save', async function () {
+  // 1. Hash PIN if modified
   if (this.isModified('pin')) {
-    try {
-      const salt = await bcrypt.genSalt(10);
-      this.pin = await bcrypt.hash(this.pin, salt);
-    } catch (error) {
-      return next(error);
-    }
+    const salt = await bcrypt.genSalt(10);
+    this.pin = await bcrypt.hash(this.pin, salt);
   }
-  next();
-});
 
-// Generate referral code
-userSchema.pre('save', async function (next) {
-  if (this.referralCode) return next();
-  
-  let code;
-  let exists;
-  
-  do {
-    code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    exists = await mongoose.models.User.findOne({ referralCode: code });
-  } while (exists);
-  
-  this.referralCode = code;
-  next();
+  // 2. Generate referral code
+  if (!this.referralCode) {
+    let code;
+    let exists;
+
+    do {
+      code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      exists = await mongoose.models.User.findOne({ referralCode: code });
+    } while (exists);
+
+    this.referralCode = code;
+  }
 });
 
 // ✅ Method to check if activation is expired (7 days)
@@ -565,11 +549,11 @@ userSchema.methods.unlockNextLeg = async function() {
 };
 
 // Add to referral tree with leg unlocking logic
-userSchema.statics.addToReferralTree = async function(userId, referrerId, currentLevel = 1) {
+userSchema.statics.addToReferralTree = async function(userId, referrerId, currentLevel = 1, session = null) {
   if (currentLevel > 21 || !referrerId) return;
   
   const User = this;
-  const referrer = await User.findById(referrerId);
+  const referrer = await User.findById(referrerId).session(session);
   
   if (!referrer) return;
   
@@ -579,19 +563,13 @@ userSchema.statics.addToReferralTree = async function(userId, referrerId, curren
   
   const updateField = `referralTree.level${currentLevel}`;
   
-  await User.findByIdAndUpdate(
-    referrerId,
-    { $addToSet: { [updateField]: userId } }
-  );
-  
-  await User.findByIdAndUpdate(
-    referrerId,
-    { 
-      $inc: { 
-        [`teamCashback.level${currentLevel}.count`]: 1
-      } 
-    }
-  );
+  if (session) {
+    await User.findByIdAndUpdate(referrerId, { $addToSet: { [updateField]: userId } }, { session });
+    await User.findByIdAndUpdate(referrerId, { $inc: { [`teamCashback.level${currentLevel}.count`]: 1 } }, { session });
+  } else {
+    await User.findByIdAndUpdate(referrerId, { $addToSet: { [updateField]: userId } });
+    await User.findByIdAndUpdate(referrerId, { $inc: { [`teamCashback.level${currentLevel}.count`]: 1 } });
+  }
   
   if (currentLevel === 3 || currentLevel === 6 || currentLevel === 9 || 
       currentLevel === 12 || currentLevel === 15 || currentLevel === 18) {
@@ -599,7 +577,7 @@ userSchema.statics.addToReferralTree = async function(userId, referrerId, curren
   }
   
   if (referrer.referredBy) {
-    await User.addToReferralTree(userId, referrer.referredBy, currentLevel + 1);
+    await User.addToReferralTree(userId, referrer.referredBy, currentLevel + 1, session);
   }
 };
 
