@@ -35,19 +35,19 @@ const bcrypt = require('bcryptjs');
 const adminSchema = new mongoose.Schema({
   adminId: { 
     type: String, 
-    required: true, 
+    required: true,
     unique: true,
     trim: true,
-    match: [/^\d{6}$/, 'Admin ID must be exactly 6 digits'] // 6-digit validation
+    match: [/^\d{6}$/, 'Admin ID must be exactly 6 digits']
   },
   pin: { 
     type: String, 
-    required: true 
+    required: true
   },
   role: { 
-    type: String, 
+    type: String,
     enum: ['admin', 'superadmin'],
-    default: 'admin' 
+    default: 'admin'
   },
   name: { 
     type: String,
@@ -59,22 +59,18 @@ const adminSchema = new mongoose.Schema({
   },
   permissions: [{
     type: String,
-    enum: ['all', 'deposits', 'withdrawals', 'users', 'scanners', 'rates']
+    enum: ['all','deposits','withdrawals','users','scanners','rates']
   }],
   lastLogin: Date
-}, { timestamps: true });
+},{ timestamps:true });
 
-// Hash PIN before saving
-adminSchema.pre('save', async function (next) {
-  if (this.isModified('pin')) {
-    this.pin = await bcrypt.hash(this.pin, 10);
-  }
-  next();
+adminSchema.pre('save', async function () {
+  if (!this.isModified('pin')) return;
+  this.pin = await bcrypt.hash(this.pin, 10);
 });
 
-// Compare PIN method
-adminSchema.methods.comparePin = async function(candidatePin) {
-  return await bcrypt.compare(candidatePin, this.pin);
+adminSchema.methods.comparePin = async function(pin) {
+  return bcrypt.compare(pin, this.pin);
 };
 
 module.exports = mongoose.model('Admin', adminSchema);
