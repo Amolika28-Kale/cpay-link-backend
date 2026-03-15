@@ -50,16 +50,10 @@ app.use("/uploads", express.static("uploads"));
 ================================= */
 
 mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    retryWrites: true,
-    w: "majority",
-  })
+  .connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ MongoDB Connected Successfully");
 
-    // Start auto request jobs
     AutoRequestService.startScheduledJobs();
   })
   .catch((err) => {
