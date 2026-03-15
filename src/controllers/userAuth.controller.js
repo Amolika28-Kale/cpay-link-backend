@@ -897,17 +897,16 @@ exports.register = async (req, res) => {
 
     await Transaction.insertMany(transactions, { session });
 
-    // ✅ 10. Add to referral tree
-    await User.addToReferralTree(user._id, referrer._id, 1, session);
-
+// ✅ 10. Add to referral tree - session सह
+await User.addToReferralTree(user._id, referrer._id, 1, session); // <-- session parameter add केला
     // ✅ 11. Create FIRST AUTO REQUEST for new user
     const AutoRequestService = require("../../services/autoRequestService");
     let autoRequest = null;
     try {
       autoRequest = await AutoRequestService.createFirstAutoRequestForUser(user._id, 1000, session);
-      console.log(`✅ First auto request created for new user: ${user.userId}`);
+      // console.log(`✅ First auto request created for new user: ${user.userId}`);
     } catch (autoRequestError) {
-      console.error("❌ Failed to create auto request for new user:", autoRequestError);
+      // console.error("❌ Failed to create auto request for new user:", autoRequestError);
     }
 
     // ✅ 12. Commit transaction
@@ -1113,7 +1112,7 @@ exports.getReferralStats = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Referral Stats Error:", err);
+    // console.error("Referral Stats Error:", err);
     res.status(500).json({ message: err.message });
   }
 };
