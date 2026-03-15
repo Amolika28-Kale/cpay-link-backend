@@ -40,7 +40,7 @@ app.use(
 );
 
 // Handle preflight requests
-app.options("*", cors());
+app.options(/.*/, cors());
 
 // Static folder
 app.use("/uploads", express.static("uploads"));
