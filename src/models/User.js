@@ -286,7 +286,7 @@ const userSchema = new mongoose.Schema({
     trim: true
   },
 
-  email: {                    
+  email: {
     type: String,
     required: true,
     unique: true,
@@ -308,11 +308,13 @@ const userSchema = new mongoose.Schema({
 
   firstDepositCompleted: { type: Boolean, default: false },
   firstAcceptCompleted: { type: Boolean, default: false },
+  totalPayRequests: { type: Number, default: 0 },
+  totalAcceptedRequests: { type: Number, default: 0 },
 
-  referralCode: { type: String, unique: true, sparse: true },
+  referralCode: { type: String, unique: true },
   referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   
-  // 21-Level Referral Tree
+  // 21-Level Referral Tree with Leg structure
   referralTree: {
     level1: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     level2: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
@@ -411,7 +413,7 @@ const userSchema = new mongoose.Schema({
   },
 
   legsUnlocked: {
-    leg1: { type: Boolean, default: true },
+    leg1: { type: Boolean, default: false },
     leg2: { type: Boolean, default: false },
     leg3: { type: Boolean, default: false },
     leg4: { type: Boolean, default: false },
@@ -420,11 +422,13 @@ const userSchema = new mongoose.Schema({
     leg7: { type: Boolean, default: false }
   },
 
+  // Wallet Activation Fields
   walletActivated: { type: Boolean, default: false },
   activationDate: { type: Date, default: null },
   activationExpiryDate: { type: Date, default: null },
   dailyAcceptLimit: { type: Number, default: 1000 },
   
+  // 7-Day Limit Fields
   sevenDayTotalAccepted: { type: Number, default: 0 },
   sevenDayResetDate: { type: Date, default: null },
   activationHistory: [{
@@ -462,41 +466,49 @@ const userSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-userSchema.pre('save', async function () {
-  // 1. Hash PIN if modified
+// Hash PIN before saving
+userSchema.pre('save', async function (next) {
   if (this.isModified('pin')) {
-    const salt = await bcrypt.genSalt(10);
-    this.pin = await bcrypt.hash(this.pin, salt);
+    try {
+      const salt = await bcrypt.genSalt(10);
+      this.pin = await bcrypt.hash(this.pin, salt);
+    } catch (error) {
+      return next(error);
+    }
   }
-
-  // 2. Generate referral code
-  if (!this.referralCode) {
-    let code;
-    let exists;
-
-    do {
-      code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      exists = await mongoose.models.User.findOne({ referralCode: code });
-    } while (exists);
-
-    this.referralCode = code;
-  }
+  next();
 });
 
-// ✅ Method to check if activation is expired (7 days)
+// Generate referral code
+userSchema.pre('save', async function (next) {
+  if (this.referralCode) return next();
+  
+  let code;
+  let exists;
+  
+  do {
+    code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    exists = await mongoose.models.User.findOne({ referralCode: code });
+  } while (exists);
+  
+  this.referralCode = code;
+  next();
+});
+
+// Method to check if activation is expired (7 days)
 userSchema.methods.isActivationExpired = function() {
   if (!this.activationExpiryDate) return true;
   return new Date() > this.activationExpiryDate;
 };
 
-// ✅ Method to get remaining days
+// Method to get remaining days
 userSchema.methods.getRemainingDays = function() {
   if (!this.activationExpiryDate) return 0;
   const diffTime = this.activationExpiryDate - new Date();
   return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 };
 
-// ✅ Method to reset 7-day totals if needed
+// Method to reset 7-day totals if needed
 userSchema.methods.checkAndResetSevenDay = function() {
   if (this.sevenDayResetDate && new Date() > this.sevenDayResetDate) {
     this.sevenDayTotalAccepted = 0;
@@ -508,47 +520,119 @@ userSchema.methods.checkAndResetSevenDay = function() {
   return false;
 };
 
-// Method to check if a leg is unlocked
-userSchema.methods.isLegUnlocked = function(level) {
-  if (level <= 3) return true;
-  
-  const legMap = {
-    4: 'leg2', 5: 'leg2', 6: 'leg2',
-    7: 'leg3', 8: 'leg3', 9: 'leg3',
-    10: 'leg4', 11: 'leg4', 12: 'leg4',
-    13: 'leg5', 14: 'leg5', 15: 'leg5',
-    16: 'leg6', 17: 'leg6', 18: 'leg6',
-    19: 'leg7', 20: 'leg7', 21: 'leg7'
+// ========== CORRECTED LEG UNLOCK METHODS ==========
+
+/**
+ * Get leg requirements
+ */
+userSchema.statics.getLegRequirements = function() {
+  return {
+    leg1: { required: 1, levels: [1, 2, 3] },
+    leg2: { required: 2, levels: [4, 5, 6] },
+    leg3: { required: 3, levels: [7, 8, 9] },
+    leg4: { required: 4, levels: [10, 11, 12] },
+    leg5: { required: 5, levels: [13, 14, 15] },
+    leg6: { required: 6, levels: [16, 17, 18] },
+    leg7: { required: 7, levels: [19, 20, 21] }
   };
+};
+
+/**
+ * Get leg for a specific level
+ */
+userSchema.methods.getLegForLevel = function(level) {
+  const requirements = this.constructor.getLegRequirements();
   
-  const leg = legMap[level];
-  return this.legsUnlocked && this.legsUnlocked[leg];
+  for (const [leg, data] of Object.entries(requirements)) {
+    if (data.levels.includes(level)) {
+      return leg;
+    }
+  }
+  return null;
 };
 
-// Method to unlock next leg
-userSchema.methods.unlockNextLeg = async function() {
-  if (!this.legsUnlocked.leg2 && this.referralTree.level3?.length > 0) {
-    this.legsUnlocked.leg2 = true;
+/**
+ * Method to check if a specific level's leg is unlocked
+ * Leg unlocking is based on DIRECT REFERRALS count
+ */
+userSchema.methods.isLegUnlocked = function(level) {
+  const directCount = this.referralTree?.level1?.length || 0;
+  const requirements = this.constructor.getLegRequirements();
+  
+  // Find which leg this level belongs to
+  for (const [leg, data] of Object.entries(requirements)) {
+    if (data.levels.includes(level)) {
+      // Check if user has enough direct referrals for this leg
+      return directCount >= data.required;
+    }
   }
-  if (!this.legsUnlocked.leg3 && this.referralTree.level6?.length > 0) {
-    this.legsUnlocked.leg3 = true;
-  }
-  if (!this.legsUnlocked.leg4 && this.referralTree.level9?.length > 0) {
-    this.legsUnlocked.leg4 = true;
-  }
-  if (!this.legsUnlocked.leg5 && this.referralTree.level12?.length > 0) {
-    this.legsUnlocked.leg5 = true;
-  }
-  if (!this.legsUnlocked.leg6 && this.referralTree.level15?.length > 0) {
-    this.legsUnlocked.leg6 = true;
-  }
-  if (!this.legsUnlocked.leg7 && this.referralTree.level18?.length > 0) {
-    this.legsUnlocked.leg7 = true;
-  }
-  await this.save();
+  
+  return false;
 };
 
-// Add to referral tree with leg unlocking logic
+/**
+ * Method to unlock legs based on DIRECT REFERRALS count
+ * Each leg unlocks based on direct referrals count
+ */
+userSchema.methods.unlockLegs = async function() {
+  let changed = false;
+  
+  // Get direct referrals count
+  const directCount = this.referralTree?.level1?.length || 0;
+  const requirements = this.constructor.getLegRequirements();
+  
+  console.log(`\n🔓 Checking leg unlock for ${this.userId}:`);
+  console.log(`Direct referrals: ${directCount}`);
+  console.log(`Current legs unlocked:`, this.legsUnlocked);
+  
+  // Check each leg requirement
+  for (const [leg, data] of Object.entries(requirements)) {
+    if (!this.legsUnlocked[leg] && directCount >= data.required) {
+      this.legsUnlocked[leg] = true;
+      changed = true;
+      console.log(`✅ ${leg} unlocked - ${data.required} direct referral${data.required > 1 ? 's' : ''}`);
+    }
+  }
+  
+  if (changed) {
+    await this.save();
+    console.log(`✅ Updated legs unlocked for ${this.userId}:`, this.legsUnlocked);
+  } else {
+    console.log(`ℹ️ No new legs unlocked for ${this.userId}`);
+  }
+  
+  return changed;
+};
+
+/**
+ * Get next leg to unlock
+ */
+userSchema.methods.getNextLegToUnlock = function() {
+  const directCount = this.referralTree?.level1?.length || 0;
+  const requirements = this.constructor.getLegRequirements();
+  const legOrder = ['leg1', 'leg2', 'leg3', 'leg4', 'leg5', 'leg6', 'leg7'];
+  
+  for (const leg of legOrder) {
+    if (!this.legsUnlocked[leg]) {
+      const required = requirements[leg].required;
+      return {
+        leg,
+        required,
+        current: directCount,
+        remaining: Math.max(0, required - directCount),
+        levels: requirements[leg].levels,
+        isUnlockable: directCount >= required
+      };
+    }
+  }
+  
+  return null; // All legs unlocked
+};
+
+/**
+ * Add user to referral tree (uplines)
+ * This function recursively adds the user to all upline levels
+ */
 userSchema.statics.addToReferralTree = async function(userId, referrerId, currentLevel = 1, session = null) {
   if (currentLevel > 21 || !referrerId) return;
   
@@ -557,25 +641,42 @@ userSchema.statics.addToReferralTree = async function(userId, referrerId, curren
   
   if (!referrer) return;
   
+  // IMPORTANT: Check if this level's leg is unlocked for the referrer
   if (!referrer.isLegUnlocked(currentLevel)) {
+    console.log(`❌ Level ${currentLevel} leg not unlocked for ${referrer.userId}, skipping...`);
     return;
   }
   
+  console.log(`✅ Adding user to ${referrer.userId}'s level ${currentLevel} (leg unlocked)`);
+  
+  // Add user to referrer's level
   const updateField = `referralTree.level${currentLevel}`;
   
-  if (session) {
-    await User.findByIdAndUpdate(referrerId, { $addToSet: { [updateField]: userId } }, { session });
-    await User.findByIdAndUpdate(referrerId, { $inc: { [`teamCashback.level${currentLevel}.count`]: 1 } }, { session });
-  } else {
-    await User.findByIdAndUpdate(referrerId, { $addToSet: { [updateField]: userId } });
-    await User.findByIdAndUpdate(referrerId, { $inc: { [`teamCashback.level${currentLevel}.count`]: 1 } });
+  await User.findByIdAndUpdate(
+    referrerId,
+    { $addToSet: { [updateField]: userId } },
+    { session }
+  );
+  
+  // Update team cashback count
+  await User.findByIdAndUpdate(
+    referrerId,
+    { 
+      $inc: { 
+        [`teamCashback.level${currentLevel}.count`]: 1
+      } 
+    },
+    { session }
+  );
+  
+  // IMPORTANT: For direct referrals (Level 1), check if new legs should be unlocked
+  if (currentLevel === 1) {
+    console.log(`🔍 New direct referral added for ${referrer.userId}, checking leg unlocks...`);
+    const updatedReferrer = await User.findById(referrerId).session(session);
+    await updatedReferrer.unlockLegs();
   }
   
-  if (currentLevel === 3 || currentLevel === 6 || currentLevel === 9 || 
-      currentLevel === 12 || currentLevel === 15 || currentLevel === 18) {
-    await referrer.unlockNextLeg();
-  }
-  
+  // Continue up the tree (uplines)
   if (referrer.referredBy) {
     await User.addToReferralTree(userId, referrer.referredBy, currentLevel + 1, session);
   }

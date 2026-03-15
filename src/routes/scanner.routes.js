@@ -123,6 +123,8 @@ router.post("/accept", userAuth, scannerController.acceptRequest);
 router.post("/submit-payment", userAuth, upload.single("screenshot"), scannerController.submitPayment);
 router.post("/confirm", userAuth, scannerController.confirmFinalPayment);
 router.post("/self-pay", userAuth, scannerController.selfPay);
+// Cancel request
+router.delete("/cancel/:scannerId", userAuth, scannerController.cancelRequest);
 
 /* ================= SCREENSHOT MANAGEMENT ROUTES ================= */
 router.get("/screenshots/:scannerId", userAuth, scannerController.getScannerScreenshots);
@@ -131,5 +133,5 @@ router.post("/delete-screenshot", userAuth, scannerController.deleteScreenshot);
 
 /* ================= ADMIN ROUTES ================= */
 router.get('/all', adminAuthMiddleware, scannerController.getAllScanners);
-
+router.post("/request-utr", userAuth, scannerController.requestUTR);
 module.exports = router;
