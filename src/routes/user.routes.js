@@ -256,7 +256,6 @@
 // module.exports = router;
 
 
-
 // routes/userAuth.routes.js
 const express = require('express');
 const router = express.Router();
@@ -269,13 +268,49 @@ const {
 const userAuth = require("../middlewares/userAuth.middleware");
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
+const ReferralService = require('../../services/referralService');
 
 // Auth Routes
 router.post('/register', register);
 router.post('/login', login);
 router.get('/referral', userAuth, getReferralStats);
 
-// ========== UPDATED: Get leg unlocking status for Dynamic Legs ==========
+// ========== HELPER FUNCTIONS ==========
+const getHorizontalRequirement = (level) => {
+  if (level <= 3) return 1;
+  if (level <= 6) return 2;
+  if (level <= 9) return 3;
+  if (level <= 12) return 4;
+  if (level <= 15) return 5;
+  if (level <= 18) return 6;
+  return 7;
+};
+
+const getRequiredLevels = (level) => {
+  const requirements = {
+    4: [1, 2, 3],
+    5: [2, 3, 4],
+    6: [3, 4, 5],
+    7: [4, 5, 6],
+    8: [5, 6, 7],
+    9: [6, 7, 8],
+    10: [7, 8, 9],
+    11: [8, 9, 10],
+    12: [9, 10, 11],
+    13: [10, 11, 12],
+    14: [11, 12, 13],
+    15: [12, 13, 14],
+    16: [13, 14, 15],
+    17: [14, 15, 16],
+    18: [15, 16, 17],
+    19: [16, 17, 18],
+    20: [17, 18, 19],
+    21: [18, 19, 20]
+  };
+  return requirements[level] || [];
+};
+
+// ========== GET LEG UNLOCKING STATUS WITH HORIZONTAL REQUIREMENTS ==========
 router.get('/leg-status', userAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -284,77 +319,111 @@ router.get('/leg-status', userAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
     
-    // Dynamic legs मध्ये प्रत्येक direct referral साठी एक leg आहे
-    const directReferralsCount = user.legs.length;
-    const totalLegs = user.legs.length;
+    const directReferralsCount = user.legs?.length || 0;
+    const totalLegs = user.legs?.length || 0;
+    const activeLegs = user.legs?.filter(leg => leg.isActive).length || 0;
     
-    // Level requirements मिळवा (कोणत्या levels साठी कोणते levels पाहिजेत)
-    const levelRequirements = User.getLevelRequirements();
-    
-    // Level accessibility check करा
+    // Level accessibility check
     const levelAccessibility = {};
     for (let level = 1; level <= 21; level++) {
+      const minDirectsNeeded = getHorizontalRequirement(level);
+      const requiredLevels = getRequiredLevels(level);
+      
       levelAccessibility[`level${level}`] = {
-        isAccessible: user.isLevelAccessible(level),
-        requiredLevels: levelRequirements[level]?.required || [],
-        usersCount: 0
+        isAccessible: user.isLevelAccessible ? user.isLevelAccessible(level) : (level <= 3),
+        requiredLevels,
+        minDirectsNeeded,
+        currentDirects: directReferralsCount,
+        usersCount: 0,
+        meetsHorizontal: directReferralsCount >= minDirectsNeeded,
+        unlockedLegs: 0,
+        legWiseUsers: {}
       };
       
       // Count users at this level across all legs
-      for (const leg of user.legs) {
+      for (let legIndex = 0; legIndex < (user.legs || []).length; legIndex++) {
+        const leg = user.legs[legIndex];
         const levelKey = `level${level}`;
-        if (leg.levels[levelKey]) {
-          levelAccessibility[`level${level}`].usersCount += leg.levels[levelKey].users.length;
+        if (leg.levels?.[levelKey]) {
+          const userCount = leg.levels[levelKey].users?.length || 0;
+          levelAccessibility[`level${level}`].usersCount += userCount;
+          levelAccessibility[`level${level}`].legWiseUsers[`leg${legIndex+1}`] = userCount;
+          if (leg.levels[levelKey].isUnlocked) {
+            levelAccessibility[`level${level}`].unlockedLegs++;
+          }
         }
       }
     }
     
-    // Leg details तयार करा
+    // Leg details
     const legDetails = {};
-    for (let i = 0; i < user.legs.length; i++) {
+    for (let i = 0; i < (user.legs || []).length; i++) {
       const leg = user.legs[i];
+      
+      // Calculate unlocked levels in this leg
+      let unlockedCount = 0;
+      const levelStatus = {};
+      for (let level = 1; level <= 21; level++) {
+        const isUnlocked = leg.levels?.[`level${level}`]?.isUnlocked || level <= 3;
+        if (isUnlocked) unlockedCount++;
+        levelStatus[`level${level}`] = {
+          users: leg.levels?.[`level${level}`]?.users?.length || 0,
+          isUnlocked,
+          unlockedAt: leg.levels?.[`level${level}`]?.unlockedAt,
+          earnings: leg.levels?.[`level${level}`]?.earnings || 0
+        };
+      }
+      
       legDetails[`leg${i+1}`] = {
         legNumber: leg.legNumber,
         rootUser: leg.rootUser,
         joinedAt: leg.joinedAt,
-        totalUsers: leg.stats.totalUsers,
-        totalEarnings: leg.stats.totalEarnings,
-        levels: {}
+        isActive: leg.isActive !== false, // सगळ्या legs active
+        totalUsers: leg.stats?.totalUsers || 0,
+        totalEarnings: leg.stats?.totalEarnings || 0,
+        unlockedLevels: unlockedCount,
+        isFullyUnlocked: unlockedCount === 21,
+        levels: levelStatus
       };
-      
-      // Leg मधील प्रत्येक level ची माहिती
-      for (let level = 1; level <= 21; level++) {
-        const levelKey = `level${level}`;
-        legDetails[`leg${i+1}`].levels[`level${level}`] = {
-          users: leg.levels[levelKey].users.length,
-          isUnlocked: leg.levels[levelKey].isUnlocked,
-          unlockedAt: leg.levels[levelKey].unlockedAt
-        };
-      }
     }
     
-    // Next level to unlock शोधा
+    // Next level to unlock
     let nextLevelToUnlock = null;
     for (let level = 4; level <= 21; level++) {
       if (!levelAccessibility[`level${level}`].isAccessible) {
-        nextLevelToUnlock = {
-          level: level,
-          requiredLevels: levelRequirements[level]?.required || [],
-          remaining: 0 // Calculate based on missing users in required levels
-        };
+        const minDirectsNeeded = getHorizontalRequirement(level);
+        const requiredLevels = getRequiredLevels(level);
         
-        // Check which required levels are missing users
-        const missingLevels = [];
-        for (const reqLevel of nextLevelToUnlock.requiredLevels) {
+        // Check which requirements are missing
+        const missingReqs = [];
+        
+        // Check horizontal requirement
+        if (directReferralsCount < minDirectsNeeded) {
+          missingReqs.push(`Need ${minDirectsNeeded} direct referrals (have ${directReferralsCount})`);
+        }
+        
+        // Check vertical requirement
+        for (const reqLevel of requiredLevels) {
           if (levelAccessibility[`level${reqLevel}`].usersCount === 0) {
-            missingLevels.push(reqLevel);
+            missingReqs.push(`Level ${reqLevel} has no users`);
           }
         }
-        nextLevelToUnlock.missingLevels = missingLevels;
-        nextLevelToUnlock.remaining = missingLevels.length;
+        
+        nextLevelToUnlock = {
+          level: level,
+          requiredLevels,
+          minDirectsNeeded,
+          currentDirects: directReferralsCount,
+          missingReqs,
+          remaining: missingReqs.length
+        };
         break;
       }
     }
+    
+    // Get missed commissions summary
+    const missedCommissions = user.getMissedCommissionsSummary ? 
+      user.getMissedCommissionsSummary() : { totalMissed: 0, unreadCount: 0, recent: [] };
     
     const legStatus = {
       success: true,
@@ -362,15 +431,17 @@ router.get('/leg-status', userAuth, async (req, res) => {
         userId: user.userId,
         directReferrals: directReferralsCount,
         totalLegs: totalLegs,
+        activeLegs: activeLegs,
         levelAccessibility: levelAccessibility,
         legDetails: legDetails,
         nextLevelToUnlock: nextLevelToUnlock,
-        summary: `You have ${directReferralsCount} direct referral${directReferralsCount !== 1 ? 's' : ''}, which means ${totalLegs} leg${totalLegs !== 1 ? 's' : ''}. `
+        missedCommissions: missedCommissions,
+        summary: `You have ${directReferralsCount} direct referral${directReferralsCount !== 1 ? 's' : ''} (${totalLegs} leg${totalLegs !== 1 ? 's' : ''}, ${activeLegs} active). `
       }
     };
 
     if (nextLevelToUnlock) {
-      legStatus.data.summary += `Need to complete levels ${nextLevelToUnlock.requiredLevels.join(', ')} to unlock Level ${nextLevelToUnlock.level}.`;
+      legStatus.data.summary += `Next: Level ${nextLevelToUnlock.level} - ${nextLevelToUnlock.missingReqs.join(', ')}.`;
     } else {
       legStatus.data.summary += `🎉 All 21 levels are accessible! Great job!`;
     }
@@ -383,7 +454,7 @@ router.get('/leg-status', userAuth, async (req, res) => {
   }
 });
 
-// ========== UPDATED: Get next level requirement for Dynamic Legs ==========
+// ========== GET NEXT LEVEL REQUIREMENT WITH HORIZONTAL/VERTICAL ==========
 router.get('/next-level-requirement', userAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -392,21 +463,21 @@ router.get('/next-level-requirement', userAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
     
-    const directReferrals = user.legs.length;
-    const levelRequirements = User.getLevelRequirements();
+    const directReferrals = user.legs?.length || 0;
     
     // Find next inaccessible level
     let nextLevel = null;
     for (let level = 4; level <= 21; level++) {
-      if (!user.isLevelAccessible(level)) {
-        const required = levelRequirements[level]?.required || [];
+      if (!user.isLevelAccessible || !user.isLevelAccessible(level)) {
+        const required = getRequiredLevels(level);
+        const minDirectsNeeded = getHorizontalRequirement(level);
         
         // Check progress on required levels
         const progress = {};
         for (const reqLevel of required) {
           let usersCount = 0;
-          for (const leg of user.legs) {
-            usersCount += leg.levels[`level${reqLevel}`]?.users.length || 0;
+          for (const leg of user.legs || []) {
+            usersCount += leg.levels?.[`level${reqLevel}`]?.users?.length || 0;
           }
           progress[`level${reqLevel}`] = {
             required: true,
@@ -418,13 +489,23 @@ router.get('/next-level-requirement', userAuth, async (req, res) => {
         const completedCount = Object.values(progress).filter(p => p.isComplete).length;
         const remainingCount = required.length - completedCount;
         
+        // Check horizontal progress
+        const horizontalProgress = {
+          required: minDirectsNeeded,
+          current: directReferrals,
+          isComplete: directReferrals >= minDirectsNeeded,
+          remaining: Math.max(0, minDirectsNeeded - directReferrals)
+        };
+        
         nextLevel = {
           level: level,
           requiredLevels: required,
+          minDirectsNeeded,
           progress: progress,
+          horizontalProgress,
           completedCount: completedCount,
           remainingCount: remainingCount,
-          isUnlockable: completedCount === required.length
+          isUnlockable: (completedCount === required.length) && (directReferrals >= minDirectsNeeded)
         };
         break;
       }
@@ -435,12 +516,13 @@ router.get('/next-level-requirement', userAuth, async (req, res) => {
       data: {
         userId: user.userId,
         directReferrals: directReferrals,
-        totalLegs: user.legs.length,
+        totalLegs: user.legs?.length || 0,
+        activeLegs: user.legs?.filter(l => l.isActive).length || 0,
         nextLevelToUnlock: nextLevel,
         summary: nextLevel ? 
           (nextLevel.isUnlockable ? 
             `✅ You can unlock Level ${nextLevel.level} now!` : 
-            `⏳ Need to complete levels ${nextLevel.requiredLevels.join(', ')} to unlock Level ${nextLevel.level}. Progress: ${nextLevel.completedCount}/${nextLevel.requiredLevels.length}`) :
+            `⏳ Level ${nextLevel.level} needs: ${nextLevel.horizontalProgress.remaining > 0 ? `${nextLevel.horizontalProgress.remaining} more direct referral(s)` : ''} ${nextLevel.remainingCount > 0 ? `and complete levels ${nextLevel.requiredLevels.join(', ')}` : ''}`.trim()) :
           '🎉 All 21 levels unlocked! Great job!'
       }
     });
@@ -451,7 +533,73 @@ router.get('/next-level-requirement', userAuth, async (req, res) => {
   }
 });
 
-// ========== UPDATED: Get member details for Dynamic Legs ==========
+// ========== GET MISSED COMMISSIONS ==========
+router.get('/missed-commissions', userAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    
+    // Use ReferralService to get missed commissions
+    const missedSummary = await ReferralService.getMissedCommissionsSummary(user._id);
+    
+    res.json({
+      success: true,
+      data: missedSummary
+    });
+    
+  } catch (error) {
+    console.error("Error getting missed commissions:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ========== MARK MISSED COMMISSIONS AS READ ==========
+router.post('/missed-commissions/read', userAuth, async (req, res) => {
+  try {
+    const { commissionIds } = req.body;
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    
+    if (!user.missedCommissions) {
+      user.missedCommissions = [];
+      await user.save();
+      return res.json({ success: true, message: "No commissions to mark" });
+    }
+    
+    if (commissionIds && commissionIds.length > 0) {
+      // Mark specific commissions as read
+      user.missedCommissions.forEach(mc => {
+        if (commissionIds.includes(mc._id?.toString())) {
+          mc.read = true;
+        }
+      });
+    } else {
+      // Mark all as read
+      user.missedCommissions.forEach(mc => {
+        mc.read = true;
+      });
+    }
+    
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: "Commissions marked as read"
+    });
+    
+  } catch (error) {
+    console.error("Error marking commissions as read:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ========== GET MEMBER DETAILS WITH NEW SCHEMA ==========
 router.get('/member-details/:memberId', userAuth, async (req, res) => {
   try {
     const { memberId } = req.params;
@@ -500,30 +648,21 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
     let teamCashbackTotal = 0;
     for (const leg of member.legs || []) {
       for (let level = 1; level <= 21; level++) {
-        teamCashbackTotal += leg.levels[`level${level}`]?.teamCashback || 0;
+        teamCashbackTotal += leg.levels?.[`level${level}`]?.teamCashback || 0;
       }
     }
     
     // Calculate total team members
     let totalTeam = 0;
     const downlineCount = {};
-    const levelWiseUsers = {};
     
     for (let level = 1; level <= 21; level++) {
       let usersAtLevel = 0;
       for (const leg of member.legs || []) {
-        usersAtLevel += leg.levels[`level${level}`]?.users.length || 0;
+        usersAtLevel += leg.levels?.[`level${level}`]?.users?.length || 0;
       }
       downlineCount[`level${level}`] = usersAtLevel;
       totalTeam += usersAtLevel;
-      
-      // Store user IDs for this level (for potential expansion)
-      if (usersAtLevel > 0) {
-        levelWiseUsers[`level${level}`] = [];
-        for (const leg of member.legs || []) {
-          levelWiseUsers[`level${level}`].push(...leg.levels[`level${level}`]?.users || []);
-        }
-      }
     }
     
     // Get level-wise earnings
@@ -532,24 +671,36 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
       levelEarnings[`level${level}`] = member.earningsByLevel?.[`level${level}`] || 0;
     }
     
-    // Leg unlocking status (प्रत्येक leg साठी)
+    // Leg status
     const legsStatus = {};
     for (let i = 0; i < (member.legs || []).length; i++) {
       const leg = member.legs[i];
+      
+      let unlockedCount = 0;
+      for (let level = 1; level <= 21; level++) {
+        if (leg.levels?.[`level${level}`]?.isUnlocked) unlockedCount++;
+      }
+      
       legsStatus[`leg${i+1}`] = {
         legNumber: leg.legNumber,
         rootUser: leg.rootUser,
-        totalUsers: leg.stats.totalUsers,
-        totalEarnings: leg.stats.totalEarnings,
-        levelsUnlocked: Object.values(leg.levels).filter(l => l.isUnlocked).length
+        isActive: leg.isActive !== false,
+        totalUsers: leg.stats?.totalUsers || 0,
+        totalEarnings: leg.stats?.totalEarnings || 0,
+        unlockedLevels: unlockedCount,
+        isFullyUnlocked: unlockedCount === 21
       };
     }
     
     // Level accessibility summary
     const levelAccessibility = {};
     for (let level = 1; level <= 21; level++) {
-      levelAccessibility[`level${level}`] = member.isLevelAccessible(level);
+      levelAccessibility[`level${level}`] = member.isLevelAccessible ? 
+        member.isLevelAccessible(level) : (level <= 3);
     }
+    
+    // Get missed commissions
+    const missedCommissions = await ReferralService.getMissedCommissionsSummary(member._id);
     
     // Get member details with new schema
     const memberDetails = {
@@ -563,6 +714,7 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
       totalEarnings: member.totalEarnings || 0,
       teamCashback: teamCashbackTotal,
       levelEarnings: levelEarnings,
+      missedCommissions: missedCommissions,
       
       // Team Stats
       directReferrals: member.legs?.length || 0,
@@ -571,13 +723,14 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
       
       // Leg Status
       totalLegs: member.legs?.length || 0,
+      activeLegs: member.legs?.filter(l => l.isActive !== false).length || 0,
       legsStatus: legsStatus,
       levelAccessibility: levelAccessibility,
       
       // Relationship with current user
       relationship: {
         isCurrentUser: member._id.toString() === currentUserId,
-        isInDownline: false, // Will check below
+        isInDownline: false,
         downlineLevel: null
       },
       
@@ -589,7 +742,7 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
     if (currentUser && member._id.toString() !== currentUserId) {
       for (let level = 1; level <= 21; level++) {
         for (const leg of currentUser.legs || []) {
-          if (leg.levels[`level${level}`]?.users.includes(member._id)) {
+          if (leg.levels?.[`level${level}`]?.users?.includes(member._id)) {
             memberDetails.relationship.isInDownline = true;
             memberDetails.relationship.downlineLevel = level;
             break;
@@ -633,7 +786,7 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
   }
 });
 
-// ========== NEW: Get team summary with dynamic legs ==========
+// ========== GET TEAM SUMMARY ==========
 router.get('/team-summary', userAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -642,11 +795,24 @@ router.get('/team-summary', userAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
     
-    const teamSummary = user.getTeamSummary();
+    const teamSummary = user.getTeamSummary ? user.getTeamSummary() : {
+      totalLegs: user.legs?.length || 0,
+      directReferrals: user.legs?.length || 0,
+      totalTeam: user.teamStats?.totalTeam || 0,
+      earningsByLevel: user.earningsByLevel || {},
+      totalEarnings: user.totalEarnings || 0,
+      levels: {}
+    };
+    
+    // Add missed commissions info
+    const missedCommissions = await ReferralService.getMissedCommissionsSummary(user._id);
     
     res.json({
       success: true,
-      data: teamSummary
+      data: {
+        ...teamSummary,
+        missedCommissions
+      }
     });
     
   } catch (error) {
@@ -655,7 +821,7 @@ router.get('/team-summary', userAuth, async (req, res) => {
   }
 });
 
-// ========== NEW: Get leg-wise breakdown ==========
+// ========== GET LEG-WISE BREAKDOWN ==========
 router.get('/leg-breakdown', userAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -664,7 +830,19 @@ router.get('/leg-breakdown', userAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
     
-    const legSummary = user.getLegSummary();
+    const legSummary = user.getLegSummary ? user.getLegSummary() : {
+      totalLegs: user.legs?.length || 0,
+      directReferrals: user.legs?.length || 0,
+      legs: (user.legs || []).map(leg => ({
+        legNumber: leg.legNumber,
+        rootUser: leg.rootUser,
+        joinedAt: leg.joinedAt,
+        totalUsers: leg.stats?.totalUsers || 0,
+        totalEarnings: leg.stats?.totalEarnings || 0,
+        totalTeamCashback: leg.stats?.totalTeamCashback || 0,
+        levels: leg.levels || {}
+      }))
+    };
     
     res.json({
       success: true,
@@ -677,7 +855,7 @@ router.get('/leg-breakdown', userAuth, async (req, res) => {
   }
 });
 
-// ========== NEW: Get users at specific level ==========
+// ========== GET USERS AT SPECIFIC LEVEL ==========
 router.get('/level-users/:level', userAuth, async (req, res) => {
   try {
     const { level } = req.params;
@@ -701,9 +879,9 @@ router.get('/level-users/:level', userAuth, async (req, res) => {
     const userIds = [];
     const legMap = {};
     
-    for (let i = 0; i < user.legs.length; i++) {
+    for (let i = 0; i < (user.legs || []).length; i++) {
       const leg = user.legs[i];
-      const usersAtLevel = leg.levels[levelKey]?.users || [];
+      const usersAtLevel = leg.levels?.[levelKey]?.users || [];
       
       usersAtLevel.forEach(uid => {
         userIds.push(uid);
@@ -725,11 +903,16 @@ router.get('/level-users/:level', userAuth, async (req, res) => {
       joinedAt: u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-IN') : 'N/A'
     }));
     
+    // Get horizontal requirement for this level
+    const minDirectsNeeded = getHorizontalRequirement(levelNum);
+    
     res.json({
       success: true,
       data: {
         level: levelNum,
-        isAccessible: user.isLevelAccessible(levelNum),
+        isAccessible: user.isLevelAccessible ? user.isLevelAccessible(levelNum) : (levelNum <= 3),
+        requiredDirects: minDirectsNeeded,
+        currentDirects: user.legs?.length || 0,
         totalUsers: userList.length,
         users: userList
       }
@@ -737,6 +920,146 @@ router.get('/level-users/:level', userAuth, async (req, res) => {
     
   } catch (error) {
     console.error("Error getting level users:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ========== GET FOMO NOTIFICATIONS ==========
+router.get('/fomo-notifications', userAuth, async (req, res) => {
+  try {
+    // Use ReferralService to get FOMO notifications
+    const notifications = await ReferralService.getFomoNotifications(req.user.id);
+    
+    res.json({
+      success: true,
+      data: notifications
+    });
+    
+  } catch (error) {
+    console.error("Error getting FOMO notifications:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ========== GET LEG-WISE USERS WITH DETAILS ==========
+router.get('/leg-users/:legNumber/:level', userAuth, async (req, res) => {
+  try {
+    const { legNumber, level } = req.params;
+    const legNum = parseInt(legNumber);
+    const levelNum = parseInt(level);
+    
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    
+    // Find the specific leg
+    const leg = user.legs?.find(l => l.legNumber === legNum);
+    
+    if (!leg) {
+      return res.status(404).json({ success: false, message: "Leg not found" });
+    }
+    
+    // Get users at this level in this leg
+    const levelKey = `level${levelNum}`;
+    const userIds = leg.levels?.[levelKey]?.users || [];
+    
+    if (userIds.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          legNumber: legNum,
+          level: levelNum,
+          totalUsers: 0,
+          users: []
+        }
+      });
+    }
+    
+    // Get full user details for these IDs
+    const users = await User.find(
+      { _id: { $in: userIds } },
+      'userId email totalEarnings createdAt'
+    ).lean();
+    
+    const usersList = users.map(u => ({
+      _id: u._id,
+      userId: u.userId,
+      email: u.email,
+      totalEarnings: u.totalEarnings || 0,
+      joinedAt: u.createdAt
+    }));
+    
+    res.json({
+      success: true,
+      data: {
+        legNumber: legNum,
+        level: levelNum,
+        totalUsers: usersList.length,
+        users: usersList
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching leg users:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// ========== GET TODAY'S TEAM STATS ==========
+router.get('/today-team-stats', userAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    
+    // Get today's date range
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    // Get all users in downline
+    const allDownlineIds = [];
+    for (const leg of user.legs || []) {
+      for (let level = 1; level <= 21; level++) {
+        const usersAtLevel = leg.levels?.[`level${level}`]?.users || [];
+        allDownlineIds.push(...usersAtLevel);
+      }
+    }
+    
+    // Get today's transactions for these users
+    const todayTransactions = await Transaction.find({
+      user: { $in: allDownlineIds },
+      createdAt: { $gte: today, $lt: tomorrow },
+      type: { $in: ['DEPOSIT', 'CREDIT'] }
+    });
+    
+    const teamBusiness = todayTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    
+    // Calculate your commission (simplified - 10% of team business)
+    const yourCommission = teamBusiness * 0.1;
+    
+    // Count active members today
+    const activeMemberIds = new Set();
+    todayTransactions.forEach(tx => activeMemberIds.add(tx.user.toString()));
+    
+    res.json({
+      success: true,
+      data: {
+        teamBusiness,
+        yourCommission,
+        teamMembers: activeMemberIds.size,
+        transactions: todayTransactions.length
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching today's stats:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 });

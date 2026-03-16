@@ -598,6 +598,18 @@ const userSchema = new mongoose.Schema({
     lastUpdated: { type: Date, default: Date.now }
   },
 
+  // ========== MISSED COMMISSIONS TRACKING ==========
+  missedCommissions: [{
+    amount: { type: Number, required: true },
+    level: { type: Number, required: true },
+    legNumber: { type: Number, required: true },
+    reason: { type: String, required: true },
+    sourceUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    sourceAmount: { type: Number },
+    date: { type: Date, default: Date.now },
+    read: { type: Boolean, default: false }
+  }],
+
   // Wallet Activation Fields
   walletActivated: { type: Boolean, default: false },
   activationDate: { type: Date, default: null },
@@ -684,8 +696,6 @@ userSchema.statics.getCommissionRates = function() {
 
 /**
  * Level unlock requirements (3-level rule)
- * Level 4 साठी levels 1,2,3 पाहिजेत
- * Level 7 साठी levels 4,5,6 पाहिजेत
  */
 userSchema.statics.getLevelRequirements = function() {
   const requirements = {};
@@ -752,13 +762,42 @@ userSchema.statics.getLevelRequirements = function() {
   return requirements;
 };
 
+/**
+ * Get horizontal requirements (based on direct referrals count)
+ */
+userSchema.statics.getHorizontalRequirements = function() {
+  return {
+    4: { minDirects: 2 }, // Levels 4-6 need 2 direct referrals
+    5: { minDirects: 2 },
+    6: { minDirects: 2 },
+    7: { minDirects: 3 }, // Levels 7-9 need 3 direct referrals
+    8: { minDirects: 3 },
+    9: { minDirects: 3 },
+    10: { minDirects: 4 }, // Levels 10-12 need 4 direct referrals
+    11: { minDirects: 4 },
+    12: { minDirects: 4 },
+    13: { minDirects: 5 }, // Levels 13-15 need 5 direct referrals
+    14: { minDirects: 5 },
+    15: { minDirects: 5 },
+    16: { minDirects: 6 }, // Levels 16-18 need 6 direct referrals
+    17: { minDirects: 6 },
+    18: { minDirects: 6 },
+    19: { minDirects: 7 }, // Levels 19-21 need 7 direct referrals
+    20: { minDirects: 7 },
+    21: { minDirects: 7 }
+  };
+};
+
 // ========== INSTANCE METHODS ==========
 
 /**
  * Create a new leg when someone joins with referral code
+ * सगळ्या legs सुरुवातीपासून active असतात
  */
 userSchema.methods.createNewLeg = async function(newUserId) {
   const legNumber = this.legs.length + 1;
+  
+  console.log(`\n🦵 Creating new Leg ${legNumber} for user ${newUserId}`);
   
   // Initialize level structure
   const levels = {};
@@ -773,12 +812,12 @@ userSchema.methods.createNewLeg = async function(newUserId) {
     };
   }
   
-  // Create new leg
+  // Create new leg - सगळ्या legs active असतात
   const newLeg = {
     legNumber,
     rootUser: newUserId,
     joinedAt: new Date(),
-    isActive: true,
+    isActive: true, // सगळ्या legs active
     levels,
     stats: {
       totalUsers: 1,
@@ -790,9 +829,12 @@ userSchema.methods.createNewLeg = async function(newUserId) {
   
   this.legs.push(newLeg);
   this.directReferralsCount = this.legs.length;
-  this.teamStats.activeLegs = this.legs.length;
+  this.teamStats.activeLegs = this.legs.length; // सगळ्या legs active
+  this.teamStats.totalTeam = this.legs.length;
   
   await this.save();
+  
+  console.log(`   ✅ Leg ${legNumber} created successfully (ACTIVE)`);
   
   return legNumber;
 };
@@ -809,13 +851,39 @@ userSchema.statics.addToReferralTree = async function(userId, referrerId, sessio
   if (!referrer) return;
   
   console.log(`\n📊 Adding user to ${referrer.userId}'s tree`);
-  console.log(`   Total legs: ${referrer.legs.length}`);
   
-  // प्रत्येक leg मध्ये user ला योग्य level वर add करा
+  // ========== FIND WHICH LEG THIS USER BELONGS TO ==========
+  // Find the leg where the direct referrer is the root user
+  let targetLegIndex = -1;
+  const newUser = await User.findById(userId).session(session);
+  
+  if (newUser && newUser.referredBy) {
+    for (let i = 0; i < referrer.legs.length; i++) {
+      const leg = referrer.legs[i];
+      if (leg.rootUser?.toString() === newUser.referredBy.toString()) {
+        targetLegIndex = i;
+        console.log(`   ✅ Found target leg: Leg ${leg.legNumber}`);
+        break;
+      }
+    }
+  }
+  
+  // If no target leg found, add to all active legs
+  if (targetLegIndex === -1) {
+    console.log(`   ℹ️ No specific leg found, adding to all active legs`);
+  }
+  
+  // ========== ADD TO UPLINE'S LEGS ==========
   for (let legIndex = 0; legIndex < referrer.legs.length; legIndex++) {
     const leg = referrer.legs[legIndex];
     
-    // Find the first available level in this leg
+    // Skip inactive legs
+    if (!leg.isActive) continue;
+    
+    // If target leg is specified, only add to that leg
+    if (targetLegIndex !== -1 && legIndex !== targetLegIndex) continue;
+    
+    // Find the first available unlocked level in this leg
     for (let levelNum = 1; levelNum <= 21; levelNum++) {
       const levelKey = `level${levelNum}`;
       const level = leg.levels[levelKey];
@@ -855,15 +923,80 @@ userSchema.statics.addToReferralTree = async function(userId, referrerId, sessio
 };
 
 /**
+ * Check if a specific level is accessible in a specific leg
+ * @param {number} level - The level number (1-21)
+ * @param {number} legIndex - The index of the leg in legs array
+ * @returns {boolean} - Whether the level is accessible
+ */
+userSchema.methods.isLevelAccessible = function(level, legIndex) {
+  // Levels 1-3 are always accessible in any leg
+  if (level <= 3) {
+    return true;
+  }
+  
+  // Calculate required direct referrals for this level range
+  const requiredDirects = Math.ceil(level / 3);
+  
+  // Check if user has enough direct referrals (horizontal requirement)
+  if (this.legs.length < requiredDirects) {
+    return false;
+  }
+  
+  // If legIndex is provided, check specific leg
+  if (legIndex !== undefined && this.legs[legIndex]) {
+    const leg = this.legs[legIndex];
+    const levelKey = `level${level}`;
+    
+    // Check if level is unlocked in this specific leg
+    if (leg.levels[levelKey]?.isUnlocked) {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  // If no legIndex, check if level is unlocked in ANY leg
+  for (const leg of this.legs) {
+    const levelKey = `level${level}`;
+    if (leg.levels[levelKey]?.isUnlocked) {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
+/**
  * Check and unlock levels in a specific leg based on 3-level rule
+ * @param {number} legIndex - The index of the leg to check
+ * @returns {Object} - Result with unlocked levels and any missed commissions info
+ */
+/**
+ * Check and unlock levels in a specific leg based on 3-level rule
+ * प्रत्येक leg स्वतंत्रपणे काम करते
  */
 userSchema.methods.checkAndUnlockLevels = async function(legIndex) {
   const leg = this.legs[legIndex];
-  if (!leg) return false;
+  if (!leg) return { unlocked: false, missedCommissions: [] };
   
-  const requirements = this.constructor.getLevelRequirements();
+  const directReferralsCount = this.legs.length;
+  const missedCommissions = [];
+  
+  console.log(`\n🔓 Checking unlocks for Leg ${leg.legNumber}:`);
+  console.log(`   Total Direct Referrals: ${directReferralsCount}`);
+  
   let unlockedAny = false;
   
+  // ===== STEP 1: ENSURE LEG IS ACTIVE =====
+  // सगळ्या legs active असायला हव्यात - independent working
+  if (!leg.isActive) {
+    leg.isActive = true;
+    console.log(`   ✅ Leg ${leg.legNumber} is now ACTIVE`);
+    unlockedAny = true;
+  }
+  
+  // ===== STEP 2: UNLOCK LEVELS WITHIN THIS LEG =====
+  // Levels 1-3 are always unlocked
   for (let levelNum = 4; levelNum <= 21; levelNum++) {
     const levelKey = `level${levelNum}`;
     const level = leg.levels[levelKey];
@@ -871,25 +1004,56 @@ userSchema.methods.checkAndUnlockLevels = async function(legIndex) {
     // Skip if already unlocked
     if (level.isUnlocked) continue;
     
-    const requirement = requirements[levelNum];
-    let canUnlock = true;
+    // Calculate required direct referrals for this level range
+    const requiredDirects = Math.ceil(levelNum / 3);
+    // Level 4-6: requiredDirects = 2
+    // Level 7-9: requiredDirects = 3
+    // etc...
     
-    // Check if all required levels have users
-    for (const reqLevel of requirement.required) {
-      const reqLevelKey = `level${reqLevel}`;
-      if (leg.levels[reqLevelKey].users.length === 0) {
-        canUnlock = false;
+    // Check horizontal requirement (enough direct referrals)
+    if (directReferralsCount < requiredDirects) {
+      // This level can't be unlocked yet - needs more direct referrals
+      missedCommissions.push({
+        legNumber: leg.legNumber,
+        level: levelNum,
+        requiredDirects,
+        currentDirects: directReferralsCount,
+        reason: `Need ${requiredDirects} direct referrals (have ${directReferralsCount})`,
+        potentialRate: this.commissionRates[`level${levelNum}`] * 100
+      });
+      continue;
+    }
+    
+    // Check vertical requirement (previous levels in THIS LEG have users)
+    const prevLevels = [levelNum - 3, levelNum - 2, levelNum - 1];
+    let allPrevHaveUsers = true;
+    
+    for (const prevLevel of prevLevels) {
+      if (prevLevel < 1) continue;
+      const prevLevelKey = `level${prevLevel}`;
+      if (leg.levels[prevLevelKey].users.length === 0) {
+        allPrevHaveUsers = false;
         break;
       }
     }
     
-    if (canUnlock) {
+    if (allPrevHaveUsers) {
       level.isUnlocked = true;
       level.unlockedAt = new Date();
-      level.requiredLevels = requirement.required;
+      level.requiredLevels = prevLevels;
       unlockedAny = true;
       
-      console.log(`   🔓 Leg ${leg.legNumber} - Level ${levelNum} unlocked!`);
+      console.log(`   ✅ Leg ${leg.legNumber} Level ${levelNum} unlocked! (Need ${requiredDirects} directs, have ${directReferralsCount})`);
+    } else {
+      // Missed opportunity - previous levels in this leg are empty
+      missedCommissions.push({
+        legNumber: leg.legNumber,
+        level: levelNum,
+        requiredDirects,
+        currentDirects: directReferralsCount,
+        reason: `Previous levels (${prevLevels.join(', ')}) in Leg ${leg.legNumber} are empty`,
+        potentialRate: this.commissionRates[`level${levelNum}`] * 100
+      });
     }
   }
   
@@ -897,7 +1061,43 @@ userSchema.methods.checkAndUnlockLevels = async function(legIndex) {
     await this.save();
   }
   
-  return unlockedAny;
+  return { unlocked: unlockedAny, missedCommissions };
+};
+
+/**
+ * Check all legs for unlock opportunities
+ * @returns {Object} - Summary of unlocks and missed commissions
+ */
+userSchema.methods.checkAllLegsForUnlocks = async function() {
+  let totalUnlocked = false;
+  const allMissedCommissions = [];
+  
+  for (let i = 0; i < this.legs.length; i++) {
+    const result = await this.checkAndUnlockLevels(i);
+    if (result.unlocked) totalUnlocked = true;
+    allMissedCommissions.push(...result.missedCommissions);
+  }
+  
+  return {
+    unlocked: totalUnlocked,
+    missedCommissions: allMissedCommissions
+  };
+};
+
+/**
+ * Add a missed commission record
+ */
+userSchema.methods.addMissedCommission = function(data) {
+  this.missedCommissions.push({
+    amount: data.amount,
+    level: data.level,
+    legNumber: data.legNumber,
+    reason: data.reason,
+    sourceUserId: data.sourceUserId,
+    sourceAmount: data.sourceAmount,
+    date: new Date(),
+    read: false
+  });
 };
 
 /**
@@ -955,13 +1155,25 @@ userSchema.methods.getLegSummary = function() {
   
   for (let i = 0; i < this.legs.length; i++) {
     const leg = this.legs[i];
+    
+    // Calculate how many levels are unlocked in this leg
+    let unlockedLevels = 0;
+    for (let levelNum = 1; levelNum <= 21; levelNum++) {
+      if (leg.levels[`level${levelNum}`]?.isUnlocked) {
+        unlockedLevels++;
+      }
+    }
+    
     const legSummary = {
       legNumber: leg.legNumber,
       rootUser: leg.rootUser,
       joinedAt: leg.joinedAt,
+      isActive: leg.isActive,
       totalUsers: leg.stats.totalUsers,
       totalEarnings: leg.stats.totalEarnings,
       totalTeamCashback: leg.stats.totalTeamCashback,
+      unlockedLevels,
+      isFullyUnlocked: unlockedLevels === 21,
       levels: {}
     };
     
@@ -1024,19 +1236,20 @@ userSchema.methods.getTeamSummary = function() {
 };
 
 /**
- * Check if a specific level is accessible in any leg
+ * Get missed commissions summary
  */
-userSchema.methods.isLevelAccessible = function(level) {
-  for (const leg of this.legs) {
-    const levelKey = `level${level}`;
-    if (leg.levels[levelKey]?.isUnlocked) {
-      return true;
-    }
-  }
-  return level <= 3; // Levels 1-3 always accessible
+userSchema.methods.getMissedCommissionsSummary = function() {
+  const totalMissed = this.missedCommissions.reduce((sum, mc) => sum + mc.amount, 0);
+  const unreadCount = this.missedCommissions.filter(mc => !mc.read).length;
+  
+  return {
+    totalMissed,
+    unreadCount,
+    recent: this.missedCommissions.slice(0, 10)
+  };
 };
 
-// Activation methods (unchanged)
+// Activation methods
 userSchema.methods.isActivationExpired = function() {
   if (!this.activationExpiryDate) return true;
   return new Date() > this.activationExpiryDate;
