@@ -32,6 +32,9 @@ app.use(
       "http://localhost:5174",
       "http://localhost:5175",
       "https://cpay-link.netlify.app",
+      "https://cpaylink.io",
+      "www.cpaylink.io",
+      "https://www.cpaylink.io",
 
     ],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
