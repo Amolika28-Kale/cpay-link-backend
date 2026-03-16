@@ -6,11 +6,11 @@ require('dotenv').config();
 const User = require('./src/models/User');
 
 // MongoDB URL check
-const MONGODB_URI = process.env.MONGODB_URI || 'null';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://cpaylink11:cpaylink11@cluster0.zdbgyfs.mongodb.net/cpaylink?retryWrites=true&w=majority';
 
 mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+  
+
 }).then(() => {
   console.log('✅ MongoDB Connected Successfully');
   fixExistingUsersLegs();
@@ -19,155 +19,311 @@ mongoose.connect(MONGODB_URI, {
   process.exit(1);
 });
 
-// Fix script function - CORRECTED
+/**
+ * ============================================
+ * DYNAMIC LEGS UNLOCKING LOGIC
+ * ============================================
+ * 
+ * प्रत्येक direct referral साठी एक नवीन leg तयार होते.
+ * Leg unlocking नाही, तर LEVEL UNLOCKING आहे.
+ * 
+ * Level Unlocking Rules:
+ * - Levels 1-3: Always unlocked in all legs
+ * - Level 4: Unlocked when levels 1,2,3 have at least 1 user each in that leg
+ * - Level 5: Unlocked when levels 2,3,4 have at least 1 user each
+ * - Level 6: Unlocked when levels 3,4,5 have at least 1 user each
+ * - आणि असेच प्रत्येक level साठी...
+ */
+
+// Fix script function for DYNAMIC LEGS
 const fixExistingUsersLegs = async () => {
   try {
-    console.log("\n🔍 Starting Leg Unlocking Fix Script...");
+    console.log("\n🔍 Starting Dynamic Legs Fix Script...");
     console.log("========================================");
     
     // सगळे users मिळवा
     const allUsers = await User.find({});
     console.log(`Total users found: ${allUsers.length}`);
     
-    let leg1Fixed = 0;
-    let leg2Fixed = 0;
-    let leg3Fixed = 0;
-    let leg4Fixed = 0;
-    let leg5Fixed = 0;
-    let leg6Fixed = 0;
-    let leg7Fixed = 0;
-    let totalFixes = 0;
+    let stats = {
+      totalUsersProcessed: 0,
+      usersWithLegsFixed: 0,
+      legsAdded: 0,
+      levelsUnlocked: 0,
+      errors: 0
+    };
     
     for (const user of allUsers) {
-      let changed = false;
-      const directReferralsCount = user.referralTree?.level1?.length || 0;
-      
-      console.log(`\n👤 User: ${user.userId} (Direct referrals: ${directReferralsCount})`);
-      console.log(`   Current legs:`, user.legsUnlocked);
-      
-      // ===== LEG 1 SPECIAL HANDLING =====
-      // Leg 1 should be false if direct referrals = 0
-      // Leg 1 should be true only if direct referrals >= 1
-      if (directReferralsCount === 0 && user.legsUnlocked.leg1 === true) {
-        user.legsUnlocked.leg1 = false;
-        leg1Fixed++;
-        changed = true;
-        console.log(`   🔒 Leg 1 locked - No direct referrals`);
-      } else if (directReferralsCount >= 1 && user.legsUnlocked.leg1 === false) {
-        user.legsUnlocked.leg1 = true;
-        leg1Fixed++;
-        changed = true;
-        console.log(`   ✅ Leg 1 unlocked - Has ${directReferralsCount} direct referrals`);
-      }
-      
-      // LEG 2 (Levels 4-6): Need 2 direct referrals
-      if (directReferralsCount >= 2 && !user.legsUnlocked.leg2) {
-        user.legsUnlocked.leg2 = true;
-        leg2Fixed++;
-        changed = true;
-        console.log(`   ✅ Leg 2 unlocked - Has ${directReferralsCount} direct referrals`);
-      } else if (directReferralsCount < 2 && user.legsUnlocked.leg2 === true) {
-        user.legsUnlocked.leg2 = false;
-        leg2Fixed++;
-        changed = true;
-        console.log(`   🔒 Leg 2 locked - Needs 2 direct referrals (has ${directReferralsCount})`);
-      }
-      
-      // LEG 3 (Levels 7-9): Need 3 direct referrals
-      if (directReferralsCount >= 3 && !user.legsUnlocked.leg3) {
-        user.legsUnlocked.leg3 = true;
-        leg3Fixed++;
-        changed = true;
-        console.log(`   ✅ Leg 3 unlocked - Has ${directReferralsCount} direct referrals`);
-      } else if (directReferralsCount < 3 && user.legsUnlocked.leg3 === true) {
-        user.legsUnlocked.leg3 = false;
-        leg3Fixed++;
-        changed = true;
-        console.log(`   🔒 Leg 3 locked - Needs 3 direct referrals (has ${directReferralsCount})`);
-      }
-      
-      // LEG 4 (Levels 10-12): Need 4 direct referrals
-      if (directReferralsCount >= 4 && !user.legsUnlocked.leg4) {
-        user.legsUnlocked.leg4 = true;
-        leg4Fixed++;
-        changed = true;
-        console.log(`   ✅ Leg 4 unlocked - Has ${directReferralsCount} direct referrals`);
-      } else if (directReferralsCount < 4 && user.legsUnlocked.leg4 === true) {
-        user.legsUnlocked.leg4 = false;
-        leg4Fixed++;
-        changed = true;
-        console.log(`   🔒 Leg 4 locked - Needs 4 direct referrals (has ${directReferralsCount})`);
-      }
-      
-      // LEG 5 (Levels 13-15): Need 5 direct referrals
-      if (directReferralsCount >= 5 && !user.legsUnlocked.leg5) {
-        user.legsUnlocked.leg5 = true;
-        leg5Fixed++;
-        changed = true;
-        console.log(`   ✅ Leg 5 unlocked - Has ${directReferralsCount} direct referrals`);
-      } else if (directReferralsCount < 5 && user.legsUnlocked.leg5 === true) {
-        user.legsUnlocked.leg5 = false;
-        leg5Fixed++;
-        changed = true;
-        console.log(`   🔒 Leg 5 locked - Needs 5 direct referrals (has ${directReferralsCount})`);
-      }
-      
-      // LEG 6 (Levels 16-18): Need 6 direct referrals
-      if (directReferralsCount >= 6 && !user.legsUnlocked.leg6) {
-        user.legsUnlocked.leg6 = true;
-        leg6Fixed++;
-        changed = true;
-        console.log(`   ✅ Leg 6 unlocked - Has ${directReferralsCount} direct referrals`);
-      } else if (directReferralsCount < 6 && user.legsUnlocked.leg6 === true) {
-        user.legsUnlocked.leg6 = false;
-        leg6Fixed++;
-        changed = true;
-        console.log(`   🔒 Leg 6 locked - Needs 6 direct referrals (has ${directReferralsCount})`);
-      }
-      
-      // LEG 7 (Levels 19-21): Need 7 direct referrals
-      if (directReferralsCount >= 7 && !user.legsUnlocked.leg7) {
-        user.legsUnlocked.leg7 = true;
-        leg7Fixed++;
-        changed = true;
-        console.log(`   ✅ Leg 7 unlocked - Has ${directReferralsCount} direct referrals`);
-      } else if (directReferralsCount < 7 && user.legsUnlocked.leg7 === true) {
-        user.legsUnlocked.leg7 = false;
-        leg7Fixed++;
-        changed = true;
-        console.log(`   🔒 Leg 7 locked - Needs 7 direct referrals (has ${directReferralsCount})`);
-      }
-      
-      if (changed) {
-        await user.save();
-        totalFixes++;
-        console.log(`   💾 Saved changes for ${user.userId}`);
-        console.log(`   New legs:`, user.legsUnlocked);
+      try {
+        console.log(`\n👤 Processing User: ${user.userId || user._id}`);
+        let userChanged = false;
+        
+        // ===== STEP 1: Check if user has legs array, if not initialize =====
+        if (!user.legs || !Array.isArray(user.legs)) {
+          console.log(`   ⚠️ No legs array found, initializing...`);
+          user.legs = [];
+          user.directReferralsCount = 0;
+          user.teamStats = user.teamStats || { totalTeam: 0, activeLegs: 0, lastUpdated: new Date() };
+          user.earningsByLevel = user.earningsByLevel || {};
+          user.totalEarnings = user.totalEarnings || 0;
+          userChanged = true;
+        }
+        
+        // ===== STEP 2: Get direct referrals from old structure =====
+        // Old schema मध्ये referralTree.level1 होते, ते आता legs मध्ये convert करा
+        const oldDirectReferrals = user.referralTree?.level1 || [];
+        const oldDirectReferralsCount = oldDirectReferrals.length;
+        
+        console.log(`   Old direct referrals: ${oldDirectReferralsCount}`);
+        console.log(`   Current legs count: ${user.legs.length}`);
+        
+        // ===== STEP 3: Create legs for each direct referral =====
+        if (oldDirectReferralsCount > 0 && user.legs.length === 0) {
+          console.log(`   🔄 Converting old direct referrals to legs...`);
+          
+          for (let i = 0; i < oldDirectReferrals.length; i++) {
+            const referralId = oldDirectReferrals[i];
+            
+            // Initialize level structure for this leg
+            const levels = {};
+            for (let levelNum = 1; levelNum <= 21; levelNum++) {
+              levels[`level${levelNum}`] = {
+                users: levelNum === 1 ? [referralId] : [], // Level 1 मध्ये हा user
+                earnings: 0,
+                teamCashback: 0,
+                isUnlocked: levelNum <= 3, // Levels 1-3 always unlocked
+                unlockedAt: levelNum <= 3 ? new Date() : null,
+                requiredLevels: []
+              };
+            }
+            
+            // Create new leg
+            const newLeg = {
+              legNumber: i + 1,
+              rootUser: referralId,
+              joinedAt: new Date(),
+              isActive: true,
+              levels: levels,
+              stats: {
+                totalUsers: 1,
+                totalEarnings: 0,
+                totalTeamCashback: 0,
+                lastActivity: new Date()
+              }
+            };
+            
+            user.legs.push(newLeg);
+            stats.legsAdded++;
+            userChanged = true;
+            
+            console.log(`   ✅ Created Leg ${i+1} for referral ${referralId}`);
+          }
+          
+          user.directReferralsCount = oldDirectReferralsCount;
+          user.teamStats.activeLegs = oldDirectReferralsCount;
+        }
+        
+        // ===== STEP 4: Check and fix level unlocking for each leg =====
+        if (user.legs.length > 0) {
+          console.log(`   🔍 Checking level unlocking for ${user.legs.length} legs...`);
+          
+          for (let legIndex = 0; legIndex < user.legs.length; legIndex++) {
+            const leg = user.legs[legIndex];
+            
+            // Level unlock requirements (3-level rule)
+            const requirements = {
+              4: [1, 2, 3],
+              5: [2, 3, 4],
+              6: [3, 4, 5],
+              7: [4, 5, 6],
+              8: [5, 6, 7],
+              9: [6, 7, 8],
+              10: [7, 8, 9],
+              11: [8, 9, 10],
+              12: [9, 10, 11],
+              13: [10, 11, 12],
+              14: [11, 12, 13],
+              15: [12, 13, 14],
+              16: [13, 14, 15],
+              17: [14, 15, 16],
+              18: [15, 16, 17],
+              19: [16, 17, 18],
+              20: [17, 18, 19],
+              21: [18, 19, 20]
+            };
+            
+            for (let levelNum = 4; levelNum <= 21; levelNum++) {
+              const levelKey = `level${levelNum}`;
+              const level = leg.levels[levelKey];
+              
+              if (!level) {
+                // Initialize missing level
+                leg.levels[levelKey] = {
+                  users: [],
+                  earnings: 0,
+                  teamCashback: 0,
+                  isUnlocked: false,
+                  unlockedAt: null,
+                  requiredLevels: requirements[levelNum] || []
+                };
+                userChanged = true;
+                continue;
+              }
+              
+              // Check if this level should be unlocked
+              const required = requirements[levelNum];
+              let shouldBeUnlocked = true;
+              
+              for (const reqLevel of required) {
+                const reqLevelKey = `level${reqLevel}`;
+                const reqLevelData = leg.levels[reqLevelKey];
+                
+                // If required level doesn't exist or has no users
+                if (!reqLevelData || reqLevelData.users.length === 0) {
+                  shouldBeUnlocked = false;
+                  break;
+                }
+              }
+              
+              // Fix unlocking if needed
+              if (shouldBeUnlocked && !level.isUnlocked) {
+                level.isUnlocked = true;
+                level.unlockedAt = new Date();
+                level.requiredLevels = required;
+                userChanged = true;
+                stats.levelsUnlocked++;
+                console.log(`   🔓 Leg ${leg.legNumber} - Level ${levelNum} unlocked!`);
+              } else if (!shouldBeUnlocked && level.isUnlocked && levelNum > 3) {
+                // Levels 1-3 should always be unlocked
+                level.isUnlocked = false;
+                level.unlockedAt = null;
+                userChanged = true;
+                console.log(`   🔒 Leg ${leg.legNumber} - Level ${levelNum} locked (missing required levels)`);
+              }
+            }
+          }
+        }
+        
+        // ===== STEP 5: Remove old fields if they exist =====
+        if (user.legsUnlocked) {
+          console.log(`   🗑️ Removing old legsUnlocked object`);
+          user.legsUnlocked = undefined;
+          userChanged = true;
+        }
+        
+        if (user.referralTree) {
+          console.log(`   🗑️ Removing old referralTree object`);
+          user.referralTree = undefined;
+          userChanged = true;
+        }
+        
+        if (user.referralRates) {
+          console.log(`   🔄 Keeping referralRates but renaming to commissionRates`);
+          if (!user.commissionRates) {
+            user.commissionRates = user.referralRates;
+          }
+          user.referralRates = undefined;
+          userChanged = true;
+        }
+        
+        if (user.referralEarnings) {
+          console.log(`   🔄 Converting referralEarnings to earningsByLevel`);
+          if (!user.earningsByLevel) {
+            user.earningsByLevel = {};
+            for (let level = 1; level <= 21; level++) {
+              user.earningsByLevel[`level${level}`] = user.referralEarnings[`level${level}`] || 0;
+            }
+            user.totalEarnings = user.referralEarnings.total || 0;
+          }
+          user.referralEarnings = undefined;
+          userChanged = true;
+        }
+        
+        // ===== STEP 6: Calculate team totals =====
+        if (user.legs.length > 0) {
+          let totalTeam = 0;
+          for (const leg of user.legs) {
+            totalTeam += leg.stats?.totalUsers || 0;
+          }
+          user.teamStats.totalTeam = totalTeam;
+          user.teamStats.lastUpdated = new Date();
+        }
+        
+        // ===== STEP 7: Save user if changes made =====
+        if (userChanged) {
+          await user.save();
+          stats.usersWithLegsFixed++;
+          console.log(`   💾 Saved changes for ${user.userId || user._id}`);
+          console.log(`   📊 Now has ${user.legs.length} legs`);
+        } else {
+          console.log(`   ✅ No changes needed`);
+        }
+        
+        stats.totalUsersProcessed++;
+        
+      } catch (userError) {
+        console.error(`   ❌ Error processing user ${user._id}:`, userError.message);
+        stats.errors++;
       }
     }
     
     console.log("\n========================================");
     console.log("📊 FIX SUMMARY:");
     console.log("========================================");
-    console.log(`✅ Leg 1 fixed: ${leg1Fixed} users`);
-    console.log(`✅ Leg 2 fixed: ${leg2Fixed} users`);
-    console.log(`✅ Leg 3 fixed: ${leg3Fixed} users`);
-    console.log(`✅ Leg 4 fixed: ${leg4Fixed} users`);
-    console.log(`✅ Leg 5 fixed: ${leg5Fixed} users`);
-    console.log(`✅ Leg 6 fixed: ${leg6Fixed} users`);
-    console.log(`✅ Leg 7 fixed: ${leg7Fixed} users`);
-    console.log(`📌 Total users updated: ${totalFixes}`);
+    console.log(`✅ Total users processed: ${stats.totalUsersProcessed}`);
+    console.log(`✅ Users with fixes applied: ${stats.usersWithLegsFixed}`);
+    console.log(`✅ New legs added: ${stats.legsAdded}`);
+    console.log(`✅ Levels unlocked: ${stats.levelsUnlocked}`);
+    console.log(`❌ Errors encountered: ${stats.errors}`);
     console.log("========================================");
     
     console.log("\n✅ Fix script completed successfully!");
     
     // MongoDB connection close करा
-    mongoose.connection.close();
+    await mongoose.connection.close();
     process.exit(0);
     
   } catch (error) {
     console.error('❌ Error in fix script:', error);
-    mongoose.connection.close();
+    await mongoose.connection.close();
     process.exit(1);
   }
 };
+
+/**
+ * Helper function to check if a level should be unlocked
+ */
+function shouldLevelBeUnlocked(leg, levelNum) {
+  if (levelNum <= 3) return true; // Levels 1-3 always unlocked
+  
+  const requirements = {
+    4: [1, 2, 3],
+    5: [2, 3, 4],
+    6: [3, 4, 5],
+    7: [4, 5, 6],
+    8: [5, 6, 7],
+    9: [6, 7, 8],
+    10: [7, 8, 9],
+    11: [8, 9, 10],
+    12: [9, 10, 11],
+    13: [10, 11, 12],
+    14: [11, 12, 13],
+    15: [12, 13, 14],
+    16: [13, 14, 15],
+    17: [14, 15, 16],
+    18: [15, 16, 17],
+    19: [16, 17, 18],
+    20: [17, 18, 19],
+    21: [18, 19, 20]
+  };
+  
+  const required = requirements[levelNum] || [];
+  for (const reqLevel of required) {
+    const reqLevelKey = `level${reqLevel}`;
+    if (!leg.levels[reqLevelKey] || leg.levels[reqLevelKey].users.length === 0) {
+      return false;
+    }
+  }
+  
+  return true;
+}

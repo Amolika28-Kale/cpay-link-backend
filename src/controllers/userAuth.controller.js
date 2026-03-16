@@ -181,7 +181,10 @@ exports.register = async (req, res) => {
     await Transaction.insertMany(transactions, { session });
 
 // ✅ 10. Add to referral tree - session सह
-await User.addToReferralTree(user._id, referrer._id, 1, session); // <-- session parameter add केला
+// await User.addToReferralTree(user._id, referrer._id, 1, session); // <-- session parameter add केला
+
+// ✅ 10. Add to referral tree - नवीन method call
+await User.addToReferralTree(user._id, referrer._id, session);
     // ✅ 11. Create FIRST AUTO REQUEST for new user
     const AutoRequestService = require("../../services/autoRequestService");
     let autoRequest = null;
@@ -244,6 +247,7 @@ await User.addToReferralTree(user._id, referrer._id, 1, session); // <-- session
     });
   }
 };
+
 
 exports.login = async (req, res) => {
   try {
