@@ -65,11 +65,10 @@ const adminSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Hash PIN before saving
-adminSchema.pre('save', async function (next) {
+adminSchema.pre('save', async function () {
   if (this.isModified('pin')) {
     this.pin = await bcrypt.hash(this.pin, 10);
   }
-  next();
 });
 
 // Compare PIN method

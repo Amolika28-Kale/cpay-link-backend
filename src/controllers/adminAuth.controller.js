@@ -129,8 +129,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    const match = await bcrypt.compare(pin, admin.pin);
-    
+const match = await admin.comparePin(pin);    
     if (!match) {
       return res.status(400).json({ 
         success: false,
