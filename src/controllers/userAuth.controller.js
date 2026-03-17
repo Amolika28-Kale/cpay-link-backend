@@ -408,13 +408,18 @@
 
 // controllers/userAuth.controller.js
 const User = require('../models/User');
+const Wallet = require('../models/Wallet'); // ✅ IMPORT MISSING
+const Transaction = require('../models/Transaction');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose'); // ✅ ADD THIS
 const ReferralService = require('../../services/referralService');
-const Transaction = require('../models/Transaction');
+const AutoRequestService = require("../../services/autoRequestService"); // ✅ IMPORT AT TOP
 
 // Register new user
 const register = async (req, res) => {
+  let session = null; // ✅ DECLARE SESSION
+  
   try {
     const { userId, email, pin, referralCode } = req.body;
 
@@ -433,6 +438,10 @@ const register = async (req, res) => {
       referrer = await User.findOne({ referralCode });
     }
 
+    // ✅ START SESSION
+    session = await mongoose.startSession();
+    session.startTransaction();
+
     // Create new user
     const user = new User({
       userId,
@@ -441,9 +450,9 @@ const register = async (req, res) => {
       referredBy: referrer ? referrer._id : null
     });
 
-await user.save({ validateBeforeSave: false });
+    await user.save({ session, validateBeforeSave: false });
 
-// ✅ 8. Create default wallets with BONUS
+    // ✅ 8. Create default wallets with BONUS
     const BONUS_USDT = 1; // $1 USDT बोनस
     const CONVERSION_RATE = 95; // 1 USDT = ₹95
     
@@ -515,19 +524,18 @@ await user.save({ validateBeforeSave: false });
     ];
 
     await Transaction.insertMany(transactions, { session });
+
     // If referred, add to referrer's tree
     if (referrer) {
-      await User.addToReferralTree(user._id, referrer._id);
+      await User.addToReferralTree(user._id, referrer._id, session); // ✅ PASS SESSION
     }
 
     // ✅ 11. Create FIRST AUTO REQUEST for new user
-    const AutoRequestService = require("../../services/autoRequestService");
     let autoRequest = null;
     try {
       autoRequest = await AutoRequestService.createFirstAutoRequestForUser(user._id, 1000, session);
-      // console.log(`✅ First auto request created for new user: ${user.userId}`);
     } catch (autoRequestError) {
-      // console.error("❌ Failed to create auto request for new user:", autoRequestError);
+      console.error("❌ Failed to create auto request for new user:", autoRequestError);
     }
 
     // ✅ 12. Commit transaction
@@ -573,18 +581,20 @@ await user.save({ validateBeforeSave: false });
     });
 
   } catch (err) {
-    await session.abortTransaction();
-    session.endSession();
+    // ✅ ABORT TRANSACTION IF SESSION EXISTS
+    if (session) {
+      await session.abortTransaction();
+      session.endSession();
+    }
     console.error("Register Error:", err);
     res.status(500).json({ 
       success: false,
-      message: err.message 
+      message: err.message || "Internal Server Error"
     });
   }
 };
 
-
-// Login user
+// Login user (unchanged)
 const login = async (req, res) => {
   try {
     const { userId, pin } = req.body;

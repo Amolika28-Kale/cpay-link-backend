@@ -1039,12 +1039,7 @@ userSchema.pre('save', async function() {
   this.referralCode = code;
 });
 
-// ========== NO OTHER PRE-SAVE HOOKS BEYOND THIS POINT ==========
-// इथे खाली कुठेही userSchema.pre('save' असणार नाही
 
-// ========== INSTANCE METHODS ==========
-// ... (तुमचे सगळे instance methods तसेच राहतील)
-// तुम्ही ते खाली पेस्ट करू शकता
 
 userSchema.methods.addNotification = function(type, message, legNumber, level = null, data = {}) {
   if (!this.notifications) this.notifications = [];
