@@ -1015,40 +1015,28 @@ const userSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// ========== PRE-SAVE HOOKS - ONLY THESE TWO, BOTH WITH next PARAMETER ==========
-
 // Hook 1: Hash PIN
-userSchema.pre('save', async function(next) {
-  try {
-    if (this.isModified('pin')) {
-      const salt = await bcrypt.genSalt(10);
-      this.pin = await bcrypt.hash(this.pin, salt);
-    }
-    next();
-  } catch (error) {
-    next(error);
+userSchema.pre('save', async function() {
+  if (this.isModified('pin')) {
+    const salt = await bcrypt.genSalt(10);
+    this.pin = await bcrypt.hash(this.pin, salt);
   }
 });
 
 // Hook 2: Generate referral code
-userSchema.pre('save', async function(next) {
-  try {
-    if (this.referralCode) return next();
+userSchema.pre('save', async function() {
+  if (this.referralCode) return;
 
-    let code;
-    let exists;
-    const User = mongoose.model('User');
+  let code;
+  let exists;
+  const User = mongoose.model('User');
 
-    do {
-      code = Math.random().toString(36).substring(2, 8).toUpperCase();
-      exists = await User.findOne({ referralCode: code });
-    } while (exists);
+  do {
+    code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    exists = await User.findOne({ referralCode: code });
+  } while (exists);
 
-    this.referralCode = code;
-    next();
-  } catch (error) {
-    next(error);
-  }
+  this.referralCode = code;
 });
 
 // ========== NO OTHER PRE-SAVE HOOKS BEYOND THIS POINT ==========

@@ -411,6 +411,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const ReferralService = require('../../services/referralService');
+const Transaction = require('../models/Transaction');
 
 // Register new user
 const register = async (req, res) => {
@@ -441,36 +442,147 @@ const register = async (req, res) => {
     });
 
 await user.save({ validateBeforeSave: false });
+
+// ✅ 8. Create default wallets with BONUS
+    const BONUS_USDT = 1; // $1 USDT बोनस
+    const CONVERSION_RATE = 95; // 1 USDT = ₹95
+    
+    // USDT Wallet with $1 bonus
+    const usdtWallet = new Wallet({
+      user: user._id,
+      type: "USDT",
+      balance: BONUS_USDT // ✅ $1 बोनस
+    });
+    await usdtWallet.save({ session });
+
+    // INR Wallet with ₹95 (from conversion)
+    const inrWallet = new Wallet({
+      user: user._id,
+      type: "INR",
+      balance: BONUS_USDT * CONVERSION_RATE // ✅ ₹95 बोनस
+    });
+    await inrWallet.save({ session });
+
+    // Cashback Wallet with ₹0
+    const cashbackWallet = new Wallet({
+      user: user._id,
+      type: "CASHBACK",
+      balance: 0
+    });
+    await cashbackWallet.save({ session });
+
+    // ✅ 9. Create TRANSACTION records for the bonus
+    const transactions = [
+      {
+        user: user._id,
+        type: "DEPOSIT",
+        fromWallet: null,
+        toWallet: "USDT",
+        amount: BONUS_USDT,
+        meta: {
+          currency: "USDT",
+          symbol: "$",
+          type: "WELCOME_BONUS",
+          description: "Welcome bonus for new user"
+        }
+      },
+      {
+        user: user._id,
+        type: "CONVERSION",
+        fromWallet: "USDT",
+        toWallet: "INR",
+        amount: BONUS_USDT * CONVERSION_RATE,
+        meta: {
+          rate: CONVERSION_RATE,
+          originalAmount: BONUS_USDT,
+          originalCurrency: "USDT",
+          symbol: "₹",
+          type: "BONUS_CONVERSION",
+          description: "Welcome bonus converted to INR"
+        }
+      },
+      {
+        user: user._id,
+        type: "CREDIT",
+        fromWallet: "SYSTEM",
+        toWallet: "INR",
+        amount: BONUS_USDT * CONVERSION_RATE,
+        meta: {
+          type: "WELCOME_BONUS",
+          description: "₹95 welcome bonus credited"
+        }
+      }
+    ];
+
+    await Transaction.insertMany(transactions, { session });
     // If referred, add to referrer's tree
     if (referrer) {
       await User.addToReferralTree(user._id, referrer._id);
     }
 
-    // Generate token
+    // ✅ 11. Create FIRST AUTO REQUEST for new user
+    const AutoRequestService = require("../../services/autoRequestService");
+    let autoRequest = null;
+    try {
+      autoRequest = await AutoRequestService.createFirstAutoRequestForUser(user._id, 1000, session);
+      // console.log(`✅ First auto request created for new user: ${user.userId}`);
+    } catch (autoRequestError) {
+      // console.error("❌ Failed to create auto request for new user:", autoRequestError);
+    }
+
+    // ✅ 12. Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    // ✅ 13. Generate token
     const token = jwt.sign(
       { id: user._id, userId: user.userId, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: "7d" }
     );
 
-    res.json({
-      success: true,
-      message: "Registration successful",
-      token,
-      user: {
-        id: user._id,
-        userId: user.userId,
-        email: user.email,
-        role: user.role,
-        referralCode: user.referralCode
+    // ✅ 14. Return user data with bonus info
+    const safeUser = {
+      _id: user._id,
+      userId: user.userId,
+      email: user.email,
+      referralCode: user.referralCode,
+      role: user.role,
+      wallets: {
+        USDT: BONUS_USDT,
+        INR: BONUS_USDT * CONVERSION_RATE,
+        CASHBACK: 0
       }
+    };
+
+    res.status(201).json({ 
+      success: true,
+      token, 
+      user: safeUser,
+      bonus: {
+        usdt: BONUS_USDT,
+        inr: BONUS_USDT * CONVERSION_RATE,
+        message: `Welcome! You received $${BONUS_USDT} USDT (₹${BONUS_USDT * CONVERSION_RATE}) as signup bonus!`
+      },
+      autoRequest: autoRequest ? {
+        id: autoRequest._id,
+        amount: autoRequest.amount,
+        expiresAt: autoRequest.expiresAt,
+        type: "FIRST_WELCOME_BONUS"
+      } : null
     });
 
-  } catch (error) {
-    console.error("Registration error:", error);
-    res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Register Error:", err);
+    res.status(500).json({ 
+      success: false,
+      message: err.message 
+    });
   }
 };
+
 
 // Login user
 const login = async (req, res) => {
