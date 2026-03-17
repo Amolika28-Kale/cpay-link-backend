@@ -16,6 +16,45 @@ mongoose.connect(MONGODB_URI, {
   process.exit(1);
 });
 
+
+// Add these functions at the top of fixDirectReferralsToLegs.js
+
+/**
+ * Calculate commission rate
+ */
+function getCommissionRate(levelNum) {
+  const rates = {
+    1: 0.30, 2: 0.15, 3: 0.10, 4: 0.05, 5: 0.30,
+    6: 0.03, 7: 0.04, 8: 0.03, 9: 0.03, 10: 0.30,
+    11: 0.03, 12: 0.03, 13: 0.03, 14: 0.03, 15: 0.03,
+    16: 0.05, 17: 0.10, 18: 0.15, 19: 0.30, 20: 0.30,
+    21: 0.63
+  };
+  return rates[levelNum] || 0;
+}
+
+/**
+ * Create missed commission record
+ */
+function createMissedCommission(user, legNumber, level, reason, sourceUserId) {
+  if (!user.missedCommissions) user.missedCommissions = [];
+  
+  const rate = getCommissionRate(level);
+  const amount = 1000 * rate; // Assume ₹1000 transaction
+  
+  user.missedCommissions.push({
+    amount,
+    level,
+    legNumber,
+    reason,
+    sourceUserId,
+    sourceAmount: 1000,
+    date: new Date(),
+    read: false
+  });
+  
+  return amount;
+}
 /**
  * Helper function to get required previous levels for a given level
  */

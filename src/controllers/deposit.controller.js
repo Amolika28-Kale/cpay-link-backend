@@ -1186,8 +1186,8 @@ exports.createDeposit = async (req, res) => {
       return res.status(400).json({ message: "All fields required including screenshot" });
     }
 
-    // ✅ MINIMUM DEPOSIT CHECK - $50 USDT
-    const MIN_DEPOSIT_USDT = 50;
+    // ✅ MINIMUM DEPOSIT CHECK - $10 USDT
+    const MIN_DEPOSIT_USDT = 10;
     const depositAmount = Number(amount);
     
     if (depositAmount < MIN_DEPOSIT_USDT) {
