@@ -609,7 +609,7 @@ router.get('/today-team-stats', userAuth, async (req, res) => {
     const todayTransactions = await Transaction.find({
       user: { $in: allDownlineIds },
       createdAt: { $gte: today, $lt: tomorrow },
-      type: { $in: ['DEPOSIT', 'CREDIT'] }
+      type: { $in: ['TEAM_CASHBACK'] }
     });
     
     const teamBusiness = todayTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
@@ -634,6 +634,47 @@ router.get('/today-team-stats', userAuth, async (req, res) => {
   } catch (error) {
     console.error("Error fetching today's stats:", error);
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+router.get('/total-team-stats', userAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ success: false });
+    }
+
+    // 🔥 All downline IDs
+    const allDownlineIds = [];
+    for (const leg of user.legs || []) {
+      for (let level = 1; level <= 21; level++) {
+        const usersAtLevel = leg.levels?.[`level${level}`]?.users || [];
+        allDownlineIds.push(...usersAtLevel);
+      }
+    }
+
+    // 🔥 NO DATE FILTER
+    const transactions = await Transaction.find({
+      user: { $in: allDownlineIds },
+      type: { $in: ['TEAM_CASHBACK'] }
+    });
+
+    const teamBusiness = transactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    const yourCommission = teamBusiness * 0.1;
+
+    res.json({
+      success: true,
+      data: {
+        teamBusiness,
+        yourCommission,
+        totalTransactions: transactions.length
+      }
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false });
   }
 });
 

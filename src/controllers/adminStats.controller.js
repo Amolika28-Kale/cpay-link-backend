@@ -272,9 +272,6 @@ exports.getUserDetails = async (req, res) => {
   }
 };
 
-
-// controllers/admin.controller.js
-
 // Get all users with complete referral details
 exports.getAllUsersWithReferrals = async (req, res) => {
   try {
