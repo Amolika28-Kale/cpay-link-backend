@@ -14,7 +14,7 @@ const transactionRoutes = require("./routes/transaction.routes");
 const paymentMethodRoutes = require("./routes/payment.routes");
 const AutoRequestService = require("../services/autoRequestService");
 const findAccountRoutes = require("./routes/findAccount.routes");
-
+const supportRoutes = require('./routes/support.routes');
 const app = express();
 
 /* =================================
@@ -37,7 +37,7 @@ app.use(
       "https://www.cpaylink.io",
 
     ],
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
@@ -86,6 +86,9 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/conversion", conversionRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/find", findAccountRoutes);
+app.use("/api/support",supportRoutes);
+
+
 
 /* =================================
    GLOBAL ERROR HANDLER
