@@ -8,7 +8,7 @@ const { getAllUsers, deleteUser } = require('../controllers/adminUsers.controlle
 const { getAllDeposits, approveDeposit, rejectDeposit } = require('../controllers/deposit.controller');
 const { getAllWithdraws, approveWithdraw, rejectWithdraw } = require('../controllers/withdraw.controller');
 const { togglePaymentMethod, getAllPaymentMethods } = require('../controllers/paymentMethodController');
-const { getSystemStats, getUserDetails, getAllUsersWithReferrals } = require('../controllers/adminStats.controller'); // ✅ नवीन
+const { getSystemStats, getUserDetails, getAllUsersWithReferrals, getUserLegBreakdown, getLegLevelUsers } = require('../controllers/adminStats.controller'); // ✅ नवीन
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
@@ -90,4 +90,8 @@ router.get('/user/:userId', adminAuth, async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
+router.get('/leg-breakdown/:userId', adminAuth, getUserLegBreakdown);
+
+router.get('/leg-users/:legNumber/:level', adminAuth, getLegLevelUsers);
 module.exports = router;

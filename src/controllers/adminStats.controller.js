@@ -393,3 +393,178 @@ exports.getAllUsersWithReferrals = async (req, res) => {
     });
   }
 };
+
+
+// Get users at specific leg and level
+exports.getLegLevelUsers = async (req, res) => {
+  try {
+    const { legNumber, level } = req.params;
+    const legNum = parseInt(legNumber);
+    const levelNum = parseInt(level);
+
+    console.log(`🔍 Fetching users for leg ${legNum}, level ${levelNum}`);
+
+    // Validate parameters
+    if (isNaN(legNum) || legNum < 1 || legNum > 7) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid leg number. Must be between 1-7" 
+      });
+    }
+
+    if (isNaN(levelNum) || levelNum < 1 || levelNum > 21) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Invalid level. Must be between 1-21" 
+      });
+    }
+
+    // Find all users who have this leg and level
+    // Query: Find users where any leg has legNumber = legNum 
+    // and that leg's levelX has users
+    const levelKey = `level${levelNum}`;
+    
+    // First, find all users that might have this leg structure
+    const usersWithLegs = await User.find({
+      "legs.legNumber": legNum
+    }).select('userId email referralCode wallets totalEarnings createdAt legs');
+
+    console.log(`📊 Found ${usersWithLegs.length} users with leg ${legNum}`);
+
+    // Now extract users from the specific level of that leg
+    const levelUsers = [];
+    
+    for (const user of usersWithLegs) {
+      // Find the specific leg
+      const targetLeg = user.legs.find(leg => leg.legNumber === legNum);
+      
+      if (targetLeg && targetLeg.levels && targetLeg.levels[levelKey]) {
+        // Get users from this level
+        const levelUserIds = targetLeg.levels[levelKey].users || [];
+        
+        // Fetch complete user details for these IDs
+        if (levelUserIds.length > 0) {
+          const users = await User.find({
+            _id: { $in: levelUserIds }
+          }).select('userId email referralCode wallets totalEarnings createdAt');
+          
+          levelUsers.push(...users);
+        }
+      }
+    }
+
+    // Remove duplicates (if any user appears multiple times)
+    const uniqueUsers = [];
+    const seenIds = new Set();
+    
+    for (const user of levelUsers) {
+      if (!seenIds.has(user._id.toString())) {
+        seenIds.add(user._id.toString());
+        uniqueUsers.push(user);
+      }
+    }
+
+    console.log(`✅ Found ${uniqueUsers.length} unique users at leg ${legNum}, level ${levelNum}`);
+
+    // Format users for response
+    const formattedUsers = uniqueUsers.map(user => ({
+      _id: user._id,
+      userId: user.userId,
+      email: user.email,
+      referralCode: user.referralCode,
+      totalEarnings: user.totalEarnings || 0,
+      joinedAt: user.createdAt,
+      wallets: {
+        USDT: user.wallets?.USDT || 0,
+        INR: user.wallets?.INR || 0,
+        CASHBACK: user.wallets?.CASHBACK || 0
+      }
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        legNumber: legNum,
+        level: levelNum,
+        totalUsers: formattedUsers.length,
+        users: formattedUsers
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Error in getLegLevelUsers:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+};
+
+// Get leg breakdown for a specific user
+exports.getUserLegBreakdown = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const user = await User.findById(userId)
+      .select('userId email legs referralCode')
+      .populate('legs.rootUser', 'userId email')
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "User not found" 
+      });
+    }
+
+    // Format legs data with level-wise user counts
+    const legs = (user.legs || []).map(leg => {
+      const levelCounts = {};
+      let totalUsers = 0;
+      
+      // Calculate users in each level
+      for (let i = 1; i <= 21; i++) {
+        const levelKey = `level${i}`;
+        const levelData = leg.levels?.[levelKey];
+        const userCount = levelData?.users?.length || 0;
+        levelCounts[levelKey] = {
+          users: userCount,
+          earnings: levelData?.earnings || 0,
+          teamCashback: levelData?.teamCashback || 0,
+          isUnlocked: levelData?.isUnlocked || false
+        };
+        totalUsers += userCount;
+      }
+
+      return {
+        legNumber: leg.legNumber,
+        rootUser: leg.rootUser,
+        isActive: leg.stats?.lastActivity ? true : false,
+        stats: {
+          totalUsers: totalUsers,
+          totalEarnings: leg.stats?.totalEarnings || 0,
+          totalTeamCashback: leg.stats?.totalTeamCashback || 0
+        },
+        levels: levelCounts
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        userId: user.userId,
+        email: user.email,
+        referralCode: user.referralCode,
+        totalLegs: legs.length,
+        legs: legs
+      }
+    });
+
+  } catch (error) {
+    console.error("Error in getUserLegBreakdown:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+};
