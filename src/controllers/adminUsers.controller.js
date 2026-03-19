@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
+const Deposit = require('../models/Deposit'); // ← हे add करा
 
 exports.getAllUsers = async (req, res) => {
   try {
@@ -19,14 +20,47 @@ exports.getAllUsers = async (req, res) => {
       walletMap[uid][w.type] = w.balance;
     });
 
+    // ✅ Today's date (midnight)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    // ✅ Deposit aggregate - one query for all users
+    const depositStats = await Deposit.aggregate([
+      { $match: { status: 'approved' } },
+      {
+        $group: {
+          _id: '$user',
+          totalDeposit: { $sum: '$amount' },
+          depositCount: { $sum: 1 },
+          todayDeposit: {
+            $sum: {
+              $cond: [
+                { $gte: ['$createdAt', todayStart] },
+                '$amount',
+                0
+              ]
+            }
+          }
+        }
+      }
+    ]);
+
+    // ✅ Map बनवा - O(1) lookup
+    const depositMap = {};
+    depositStats.forEach(d => {
+      depositMap[d._id.toString()] = d;
+    });
+
     const enrichedUsers = users.map(user => {
       const uid = user._id.toString();
       
-      // Calculate stats from legs (new structure)
       const legs = user.legs || [];
       const teamCount = legs.reduce((sum, leg) => sum + (leg.stats?.totalUsers || 0), 0);
       const totalEarnings = legs.reduce((sum, leg) => sum + (leg.stats?.totalEarnings || 0), 0);
       const totalTeamCashback = legs.reduce((sum, leg) => sum + (leg.stats?.totalTeamCashback || 0), 0);
+
+      // ✅ Deposit data
+      const depData = depositMap[uid] || {};
 
       return {
         ...user,
@@ -35,9 +69,11 @@ exports.getAllUsers = async (req, res) => {
           INR: walletMap[uid]?.INR || 0,
           CASHBACK: walletMap[uid]?.CASHBACK || 0
         },
-        // Keep legs as-is (already populated)
         legs: legs,
-        // Computed stats for quick display
+        // ✅ Deposit fields
+        totalDeposit: depData.totalDeposit || 0,
+        todayDeposit: depData.todayDeposit || 0,
+        depositCount: depData.depositCount || 0,
         _computed: {
           teamCount,
           totalEarnings,

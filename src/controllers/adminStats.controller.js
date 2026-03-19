@@ -3,6 +3,8 @@ const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const Scanner = require('../models/Scanner');
 const Wallet = require('../models/Wallet');
+const Deposit = require('../models/Deposit'); // ← top ला add करा
+
 
 // Get complete system statistics
 exports.getSystemStats = async (req, res) => {
@@ -194,7 +196,7 @@ exports.getSystemStats = async (req, res) => {
   }
 };
 
-// Get single user details with all stats
+// controllers/adminStats.controller.js - getUserDetails मध्ये हे changes करा
 exports.getUserDetails = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -202,51 +204,42 @@ exports.getUserDetails = async (req, res) => {
     const user = await User.findById(userId)
       .select('-pin')
       .populate('referredBy', 'userId email')
+      .populate('legs.rootUser', 'userId email') // ← हे add करा
       .lean();
     
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Get user's transactions
     const transactions = await Transaction.find({ user: userId })
       .sort({ createdAt: -1 });
 
-    // Get user's scanners (created)
     const createdScanners = await Scanner.find({ user: userId })
       .populate('acceptedBy', 'userId email');
 
-    // Get user's accepted scanners
     const acceptedScanners = await Scanner.find({ acceptedBy: userId })
       .populate('user', 'userId email');
 
-    // Get user's wallets
     const wallets = await Wallet.find({ user: userId });
 
-    // Calculate team members
-    let teamCount = 0;
-    const teamMembers = [];
-    for (let level = 1; level <= 21; level++) {
-      const levelUsers = user.referralTree?.[`level${level}`] || [];
-      teamCount += levelUsers.length;
-      
-      if (levelUsers.length > 0) {
-        const members = await User.find(
-          { _id: { $in: levelUsers } },
-          'userId email referralEarnings wallets'
-        ).lean();
-        
-        teamMembers.push({
-          level,
-          count: levelUsers.length,
-          members: members.map(m => ({
-            userId: m.userId,
-            email: m.email,
-            earnings: m.referralEarnings?.total || 0
-          }))
-        });
-      }
-    }
+    // ✅ Deposit stats - नवीन code
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const allDeposits = await Deposit.find({ 
+      user: userId, 
+      status: 'approved' 
+    }).lean();
+
+    const totalDeposit = allDeposits.reduce((sum, d) => sum + d.amount, 0);
+    const depositCount = allDeposits.length;
+    const todayDeposit = allDeposits
+      .filter(d => new Date(d.createdAt) >= todayStart)
+      .reduce((sum, d) => sum + d.amount, 0);
+
+    // Team count (legs-based नवीन structure)
+    const legs = user.legs || [];
+    const teamCount = legs.reduce((sum, leg) => sum + (leg.stats?.totalUsers || 0), 0);
 
     res.json({
       success: true,
@@ -260,14 +253,16 @@ exports.getUserDetails = async (req, res) => {
         },
         team: {
           total: teamCount,
-          levels: teamMembers
         },
-        earnings: user.referralEarnings
+        earnings: user.referralEarnings,
+        // ✅ Deposit fields
+        totalDeposit,
+        todayDeposit,
+        depositCount
       }
     });
 
   } catch (err) {
-    // console.error("User details error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
