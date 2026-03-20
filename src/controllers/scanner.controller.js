@@ -1221,11 +1221,12 @@ exports.getActiveRequests = async (req, res) => {
     const requests = await Scanner.find({
       $or: [
         // ✅ System requests - फक्त ACTIVE (ACCEPTED नाही)
-       {
-  isAutoRequest: true,
-  status: "ACTIVE",
-  expiresAt: { $gt: new Date() }
-},
+        {
+          user: null,
+          status: "ACTIVE",  // Only ACTIVE, not ACCEPTED
+          isAutoRequest: true,
+          expiresAt: { $gt: new Date() }
+        },
         // ✅ Other users requests - फक्त ACTIVE (ACCEPTED नाही)
         {
           user: { $nin: [userId, null] },
