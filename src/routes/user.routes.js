@@ -714,4 +714,77 @@ router.get('/unlock-status-simple', userAuth, async (req, res) => {
   }
 });
 
+// ========== GET PROFILE ==========
+router.get('/profile', userAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id)
+      .select('-pin')
+      .lean();
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    
+    res.json({ success: true, user });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ========== UPDATE EMAIL ==========
+router.put('/update-email', userAuth, async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+      return res.status(400).json({ success: false, message: "Valid email required" });
+    }
+    
+    // Check if email already exists
+    const exists = await User.findOne({ email, _id: { $ne: req.user.id } });
+    if (exists) {
+      return res.status(400).json({ success: false, message: "Email already in use by another account" });
+    }
+    
+    await User.findByIdAndUpdate(req.user.id, { email });
+    
+    res.json({ success: true, message: "Email updated successfully" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ========== UPDATE PIN ==========
+router.put('/update-pin', userAuth, async (req, res) => {
+  try {
+    const { currentPin, newPin } = req.body;
+    const bcrypt = require('bcryptjs');
+    
+    if (!currentPin || currentPin.length !== 6) {
+      return res.status(400).json({ success: false, message: "Current PIN must be 6 digits" });
+    }
+    if (!newPin || newPin.length !== 6) {
+      return res.status(400).json({ success: false, message: "New PIN must be 6 digits" });
+    }
+    
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    
+    // Verify current PIN
+    const isMatch = await bcrypt.compare(currentPin, user.pin);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Current PIN is incorrect" });
+    }
+    
+    // Set new PIN — pre-save hook will hash it
+    user.pin = newPin;
+    await user.save();
+    
+    res.json({ success: true, message: "PIN updated successfully" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 module.exports = router;

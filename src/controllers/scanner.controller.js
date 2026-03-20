@@ -1080,13 +1080,13 @@ exports.requestToPay = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
     
-// First request free for new user
-if (user.totalPayRequests > 0 && user.totalPayRequests >= user.totalAcceptedRequests + 1) {
-
+if (user.totalAcceptedRequests <= user.totalPayRequests) {
   if (req.file) fs.unlinkSync(req.file.path);
-
   return res.status(403).json({
-    message: "You must accept one payment request before creating a new Pay My Bill request"
+    message: "You must accept a payment request before creating a new Pay My Bill request",
+    totalPayRequests: user.totalPayRequests,
+    totalAcceptedRequests: user.totalAcceptedRequests,
+    required: "Accept one request first"
   });
 }
 
@@ -1221,12 +1221,11 @@ exports.getActiveRequests = async (req, res) => {
     const requests = await Scanner.find({
       $or: [
         // ✅ System requests - फक्त ACTIVE (ACCEPTED नाही)
-        {
-          user: null,
-          status: "ACTIVE",  // Only ACTIVE, not ACCEPTED
-          isAutoRequest: true,
-          expiresAt: { $gt: new Date() }
-        },
+       {
+  isAutoRequest: true,
+  status: "ACTIVE",
+  expiresAt: { $gt: new Date() }
+},
         // ✅ Other users requests - फक्त ACTIVE (ACCEPTED नाही)
         {
           user: { $nin: [userId, null] },

@@ -386,6 +386,32 @@ const markNotificationRead = async (req, res) => {
   }
 };
 
+// GET /api/auth/profile
+exports.getProfile = async (req, res) => {
+  const user = await User.findById(req.user.id).select('-pin').lean();
+  res.json({ success: true, user });
+};
+
+// PUT /api/auth/update-email
+exports.updateEmail = async (req, res) => {
+  const { email } = req.body;
+  const exists = await User.findOne({ email, _id: { $ne: req.user.id } });
+  if (exists) return res.status(400).json({ success: false, message: "Email already in use" });
+  await User.findByIdAndUpdate(req.user.id, { email });
+  res.json({ success: true, message: "Email updated" });
+};
+
+// PUT /api/auth/update-pin
+exports.updatePin = async (req, res) => {
+  const { currentPin, newPin } = req.body;
+  const user = await User.findById(req.user.id);
+  const isMatch = await bcrypt.compare(currentPin, user.pin);
+  if (!isMatch) return res.status(400).json({ success: false, message: "Current PIN is incorrect" });
+  user.pin = newPin; // pre-save hook will hash it
+  await user.save();
+  res.json({ success: true, message: "PIN updated" });
+};
+
 module.exports = {
   register,
   login,
