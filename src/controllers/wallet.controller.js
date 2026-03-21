@@ -2,15 +2,64 @@ const Wallet = require('../models/Wallet');
 const Transaction = require('../models/Transaction');
 const { default: mongoose } = require('mongoose');
 const ReferralService = require('../../services/referralService');
+const User = require('../models/User');
 
 
 exports.getWallets = async (req, res) => {
   try {
     const userId = req.user.id;
+    const now = new Date();
+
+    // ✅ Safe user load
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // ✅ Safe held deposits check - heldDeposits नसेल तरी crash नाही
+    const heldDeposits = user.heldDeposits || [];
+    
+    // Auto-release expired holds
+    if (heldDeposits.length > 0) {
+      let changed = false;
+      heldDeposits.forEach(h => {
+        if (!h.released && h.heldUntil <= now) {
+          h.released = true;
+          changed = true;
+        }
+      });
+      if (changed) await user.save();
+    }
+
+    // Calculate held amount
+    const heldAmount = heldDeposits
+      .filter(h => !h.released && h.heldUntil > now)
+      .reduce((sum, h) => sum + (h.amount || 0), 0);
+
+    // Next release time
+    const nextReleaseAt = heldDeposits
+      .filter(h => !h.released && h.heldUntil > now)
+      .sort((a, b) => a.heldUntil - b.heldUntil)[0]?.heldUntil || null;
+
     const wallets = await Wallet.find({ user: userId });
-    res.json(wallets);
+
+    // ✅ Always return array
+    const enrichedWallets = wallets.map(w => {
+      const obj = w.toObject();
+      if (w.type === 'INR') {
+        return {
+          ...obj,
+          heldBalance: Math.round(heldAmount),
+          availableBalance: Math.max(0, Math.round(w.balance - heldAmount)),
+          nextReleaseAt
+        };
+      }
+      return obj;
+    });
+
+    res.json(enrichedWallets); // ✅ Array return करतो
+    
   } catch (err) {
-    res.status(500).json({ message: 'Server error' });
+    console.error("getWallets error:", err);
+    res.status(500).json({ message: err.message });
   }
 };
 

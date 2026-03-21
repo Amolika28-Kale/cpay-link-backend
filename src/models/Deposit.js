@@ -107,7 +107,10 @@ const depositSchema = new mongoose.Schema(
   rejectReason: {
     type: String,
     default: null
-  }
+  },
+  // In your Deposit mongoose schema, add:
+heldUntil: { type: Date, default: null },
+inrCredited: { type: Number, default: 0 },
 
 }, { timestamps: true });
 

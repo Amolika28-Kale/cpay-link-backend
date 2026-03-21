@@ -141,7 +141,14 @@ const userSchema = new mongoose.Schema({
     totalAutoRequests: { type: Number, default: 0 },
     autoRequestsAccepted: { type: Number, default: 0 },
     currentRequestId: { type: mongoose.Schema.Types.ObjectId, ref: "Scanner", default: null }
-  }
+  },
+  // In your User mongoose schema, add:
+heldDeposits: [{
+  amount: { type: Number },
+  heldUntil: { type: Date },
+  depositId: { type: mongoose.Schema.Types.ObjectId, ref: 'Deposit' },
+  released: { type: Boolean, default: false }
+}]
 }, { timestamps: true });
 
 // Hook 1: Hash PIN

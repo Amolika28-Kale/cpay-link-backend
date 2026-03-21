@@ -1128,35 +1128,78 @@ if (user.totalAcceptedRequests <= user.totalPayRequests) {
       return res.status(400).json({ message: "File too large. Maximum size is 5MB" });
     }
 
+    // // ========== 4. BALANCE CHECK ==========
+    // // Get user's INR wallet
+    // const inrWallet = await Wallet.findOne({ 
+    //   user: userId, 
+    //   type: "INR" 
+    // });
+
+    // if (!inrWallet) {
+    //   // If no INR wallet exists, create one with zero balance
+    //   // But user shouldn't be able to create request with zero balance
+    //   fs.unlinkSync(req.file.path);
+    //   return res.status(400).json({ 
+    //     message: "Insufficient balance. Please deposit funds first.",
+    //     requiresDeposit: true
+    //   });
+    // }
+
+    // // Check if user has sufficient balance
+    // if (inrWallet.balance < requestAmount) {
+    //   fs.unlinkSync(req.file.path);
+    //   return res.status(400).json({ 
+    //     message: `Insufficient balance. You have ₹${inrWallet.balance} but need ₹${requestAmount}. Please deposit more funds.`,
+    //     requiresDeposit: true,
+    //     currentBalance: inrWallet.balance,
+    //     requiredAmount: requestAmount,
+    //     shortfall: requestAmount - inrWallet.balance
+    //   });
+    // }
+
     // ========== 4. BALANCE CHECK ==========
-    // Get user's INR wallet
-    const inrWallet = await Wallet.findOne({ 
-      user: userId, 
-      type: "INR" 
-    });
+const inrWallet = await Wallet.findOne({ 
+  user: userId, 
+  type: "INR" 
+});
 
-    if (!inrWallet) {
-      // If no INR wallet exists, create one with zero balance
-      // But user shouldn't be able to create request with zero balance
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ 
-        message: "Insufficient balance. Please deposit funds first.",
-        requiresDeposit: true
-      });
-    }
+if (!inrWallet) {
+  if (req.file) fs.unlinkSync(req.file.path);
+  return res.status(400).json({ 
+    message: "Insufficient balance. Please deposit funds first.",
+    requiresDeposit: true
+  });
+}
 
-    // Check if user has sufficient balance
-    if (inrWallet.balance < requestAmount) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ 
-        message: `Insufficient balance. You have ₹${inrWallet.balance} but need ₹${requestAmount}. Please deposit more funds.`,
-        requiresDeposit: true,
-        currentBalance: inrWallet.balance,
-        requiredAmount: requestAmount,
-        shortfall: requestAmount - inrWallet.balance
-      });
-    }
+// ✅ NEW: Calculate held amount from recent deposits
+const now = new Date();
+const heldAmount = (user.heldDeposits || [])
+  .filter(h => !h.released && h.heldUntil > now)
+  .reduce((sum, h) => sum + h.amount, 0);
 
+const availableINR = Math.max(0, inrWallet.balance - heldAmount);
+
+// ✅ Check available (non-held) balance only
+if (availableINR < requestAmount) {
+  if (req.file) fs.unlinkSync(req.file.path);
+
+  // Different message depending on whether hold is the reason
+  const isHoldReason = heldAmount > 0 && inrWallet.balance >= requestAmount;
+  
+  return res.status(400).json({ 
+    message: isHoldReason
+      ? `₹${Math.round(heldAmount)} is held for 12 hours from your recent deposit. Available balance: ₹${Math.round(availableINR)}`
+      : `Insufficient balance. Available: ₹${Math.round(availableINR)}, Need: ₹${requestAmount}`,
+    requiresDeposit: true,
+    currentBalance: Math.round(availableINR),
+    heldBalance: Math.round(heldAmount),
+    requiredAmount: requestAmount,
+    shortfall: Math.round(requestAmount - availableINR),
+    nextReleaseAt: (user.heldDeposits || [])
+      .filter(h => !h.released && h.heldUntil > now)
+      .sort((a, b) => a.heldUntil - b.heldUntil)[0]?.heldUntil || null
+  });
+}
     // ========== 5. CREATE SCANNER REQUEST ==========
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 10);

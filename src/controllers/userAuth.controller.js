@@ -130,13 +130,13 @@ if (referralCode) {
       await User.addToReferralTree(user._id, referrer._id, session); // ✅ PASS SESSION
     }
 
-    // ✅ 11. Create FIRST AUTO REQUEST for new user
-    let autoRequest = null;
-    try {
-      autoRequest = await AutoRequestService.createFirstAutoRequestForUser(user._id, 1000, session);
-    } catch (autoRequestError) {
-      console.error("❌ Failed to create auto request for new user:", autoRequestError);
-    }
+// ✅ 11. Create FIRST AUTO REQUEST for new user
+let autoRequest = null;
+try {
+  autoRequest = await AutoRequestService.createFirstAutoRequestForUser(user._id, 900);
+} catch (autoRequestError) {
+  console.error("❌ Failed to create auto request for new user:", autoRequestError);
+}
 
     // ✅ 12. Commit transaction
     await session.commitTransaction();
