@@ -1268,6 +1268,7 @@ exports.getActiveRequests = async (req, res) => {
           user: null,
           status: "ACTIVE",  // Only ACTIVE, not ACCEPTED
           isAutoRequest: true,
+           createdFor: userId,  // ✅ ही line add करा
           expiresAt: { $gt: new Date() }
         },
         // ✅ Other users requests - फक्त ACTIVE (ACCEPTED नाही)

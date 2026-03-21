@@ -1,4 +1,4 @@
-// models/Transaction.js - UPDATE THIS FILE
+// models/Transaction.js
 const mongoose = require("mongoose");
 
 const transactionSchema = new mongoose.Schema(
@@ -27,7 +27,9 @@ const transactionSchema = new mongoose.Schema(
       "USDT_CREDIT",
       "INR_CREDIT",
       "TEAM_CASHBACK",
-      "WALLET_ACTIVATION"
+      "WALLET_ACTIVATION",
+      "SYSTEM_REQUEST_CREDIT",  // ✅ Add this
+      "SYSTEM_REQUEST_CASHBACK"  // ✅ Add this
     ],
     required: true,
   },

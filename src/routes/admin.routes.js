@@ -3,7 +3,7 @@ const router = express.Router();
 
 const adminAuth = require('../middlewares/adminAuth.middleware');
 
-const { login, setConversionRate, createAdmin, getAllAdmins, deleteAdmin } = require('../controllers/adminAuth.controller');
+const { login, setConversionRate, createAdmin, getAllAdmins, deleteAdmin, createSystemRequest, getSystemRequests, confirmSystemRequest } = require('../controllers/adminAuth.controller');
 const { getAllUsers, deleteUser } = require('../controllers/adminUsers.controller');
 const { getAllDeposits, approveDeposit, rejectDeposit } = require('../controllers/deposit.controller');
 const { getAllWithdraws, approveWithdraw, rejectWithdraw } = require('../controllers/withdraw.controller');
@@ -218,6 +218,10 @@ router.get('/user/:userId/leg/:legNumber/level/:level', adminAuth, async (req, r
     res.status(500).json({ success: false, message: error.message });
   }
 });
+// System Request Management
+router.post('/create-system-request', adminAuth, createSystemRequest);
+router.get('/system-requests', adminAuth,getSystemRequests);
+router.post('/confirm-system-request', adminAuth, confirmSystemRequest);
 module.exports = router;
 
 
