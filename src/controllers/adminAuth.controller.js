@@ -495,8 +495,9 @@ exports.getSystemRequests = async (req, res) => {
       isAutoRequest: true,
       status: { $in: ["ACTIVE", "ACCEPTED", "PAYMENT_SUBMITTED", "COMPLETED"] }
     })
-    .populate("acceptedBy", "userId name email")
-    .populate("createdFor", "userId name email")
+    .populate("user", "userId name email")           // ✅ userId add केला
+    .populate("acceptedBy", "userId name email")     // ✅ userId add केला  
+    .populate("createdFor", "userId name email")     // ✅ already होता, userId check करा
     .sort({ createdAt: -1 });
 
     console.log(`Found ${requests.length} system requests`);

@@ -2031,8 +2031,8 @@ exports.selfPay = async (req, res) => {
 exports.getAllScanners = async (req, res) => {
   try {
     const allScanners = await Scanner.find()
-      .populate("user", "name email")
-      .populate("acceptedBy", "name email")
+      .populate("user", "userId name email")         // ✅ userId add केला
+      .populate("acceptedBy", "userId name email")   // ✅ userId add केला
       .sort({ createdAt: -1 });
 
     res.json(allScanners);
