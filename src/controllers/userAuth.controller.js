@@ -133,7 +133,7 @@ if (referralCode) {
 // ✅ 11. Create FIRST AUTO REQUEST for new user
 let autoRequest = null;
 try {
-  autoRequest = await AutoRequestService.createFirstAutoRequestForUser(user._id, 900);
+  autoRequest = await AutoRequestService.createFirstAutoRequestForUser(user._id, 2000);
 } catch (autoRequestError) {
   console.error("❌ Failed to create auto request for new user:", autoRequestError);
 }

@@ -322,14 +322,14 @@ exports.getAllUsers = async (req, res) => {
 /**
  * CREATE SYSTEM REQUEST (Admin only)
  * POST /api/admin/create-system-request
- * Body: { userId: "user123" or "all", amount: 900 }
+ * Body: { userId: "user123" or "all", amount: 2000 }
  */
 exports.createSystemRequest = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { userId, amount = 900 } = req.body;
+    const { userId, amount = 2000 } = req.body;
 
     console.log("Creating system request for:", userId, "amount:", amount);
 
