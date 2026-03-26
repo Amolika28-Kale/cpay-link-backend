@@ -2122,18 +2122,40 @@ exports.requestUTR = async (req, res) => {
     if (!scanner.acceptedBy)
       return res.status(400).json({ message: "No user accepted this request yet" });
 
-    // Save flag
+    // ✅ FIX: Get the acceptor user
+    const acceptorId = scanner.acceptedBy;
+    const acceptor = await User.findById(acceptorId);
+    
+    if (acceptor) {
+      // ✅ Add notification to acceptor's notifications array
+      acceptor.addNotification(
+        'UTR_REQUESTED',
+        `📩 UTR Number requested for request #${scanner._id.toString().slice(-6)} (Amount: ₹${scanner.amount}) - Please upload UTR screenshot immediately.`,
+        null, // legNumber not applicable
+        null, // level not applicable
+        { 
+          scannerId: scanner._id, 
+          amount: scanner.amount, 
+          requestedBy: userId,
+          requestedAt: new Date()
+        }
+      );
+      await acceptor.save();
+      console.log(`✅ UTR notification sent to acceptor: ${acceptor.userId}`);
+    }
+
+    // Save flag on scanner
     scanner.utrRequested = true;
     scanner.utrRequestedAt = new Date();
-
     await scanner.save();
 
     res.json({
-      message: "UTR request sent",
-      notifyUser: scanner.acceptedBy
+      message: "UTR request sent to uploader successfully",
+      notifyUser: acceptorId
     });
 
   } catch (err) {
+    console.error("UTR request error:", err);
     res.status(500).json({ message: err.message });
   }
 };

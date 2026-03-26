@@ -18,7 +18,7 @@ const levelSchema = new mongoose.Schema({
 
 // ========== NOTIFICATION SCHEMA ==========
 const notificationSchema = new mongoose.Schema({
-  type: { type: String, enum: ['LEVEL_UNLOCKED', 'NEW_USER_ADDED'], required: true },
+  type: { type: String, enum: ['LEVEL_UNLOCKED', 'NEW_USER_ADDED' , 'UTR_REQUESTED'], required: true },
   message: { type: String, required: true },
   legNumber: { type: Number, required: true },
   level: { type: Number },
@@ -177,10 +177,18 @@ userSchema.pre('save', async function() {
 
 
 
-userSchema.methods.addNotification = function(type, message, legNumber, level = null, data = {}) {
+userSchema.methods.addNotification = function(type, message, legNumber = null, level = null, data = {}) {
   if (!this.notifications) this.notifications = [];
-  this.notifications.push({ type, message, legNumber, level, data, read: false, createdAt: new Date() });
-  console.log(`🔔 Notification added: ${message}`);
+  this.notifications.push({ 
+    type, 
+    message, 
+    legNumber, 
+    level, 
+    data, 
+    read: false, 
+    createdAt: new Date() 
+  });
+  console.log(`🔔 Notification added to ${this.userId || this._id}: ${message}`);
 };
 
 // ✅ NEW — हे paste कर
