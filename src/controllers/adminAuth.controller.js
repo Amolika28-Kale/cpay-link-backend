@@ -655,6 +655,14 @@ exports.confirmSystemRequest = async (req, res) => {
       }
     }
 
+// ✅ CORRECTED block
+const acceptorUser = await User.findById(acceptorId).session(session);
+if (acceptorUser) {
+  acceptorUser.firstAcceptCompleted = true; // फक्त हे ठेवा
+  // totalAcceptedRequests काढा — acceptRequest मध्ये आधीच +1 झालेलं आहे
+  await acceptorUser.save({ session });
+}
+
     // ✅ FIXED: Create transactions with proper values
     // Transaction 1: CREDIT
     const creditTransaction = new Transaction({
