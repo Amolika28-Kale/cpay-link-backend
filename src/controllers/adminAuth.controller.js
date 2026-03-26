@@ -387,7 +387,13 @@ exports.createSystemRequest = async (req, res) => {
     console.log("Current time:", now.toISOString());
     console.log("Expires at:", expiresAt.toISOString());
     
-    const defaultQRPath = "/uploads/auto-request-qr.png";
+    // ✅ DYNAMIC QR PATH - येथे बदल करा
+    // Amount नुसार QR path select करा
+    const qrPath = amount === 2000 
+      ? "/uploads/auto-request-qr.png"
+      : "/uploads/auto-request-qr-1000.png";
+    
+    const requestType = amount === 2000 ? "2000" : "1000";
     const createdByAdmin = req.user && req.user.id ? req.user.id : null;
     
     // ✅ Create a group ID for all requests in this batch
@@ -415,11 +421,12 @@ exports.createSystemRequest = async (req, res) => {
       const scanner = new Scanner({
         user: null, // System request
         amount: amount,
-        image: defaultQRPath,
+        image: qrPath,  // ✅ Dynamic QR path
         status: "ACTIVE",
-        expiresAt: expiresAt, // ✅ 10 minutes from now
+        expiresAt: expiresAt,
         isAutoRequest: true,
         autoRequestCycle: 1,
+        requestType: requestType,  // ✅ Store request type
         createdFor: user._id,
         createdByAdmin: createdByAdmin,
         groupRequestId: groupRequestId
@@ -428,7 +435,7 @@ exports.createSystemRequest = async (req, res) => {
       // ✅ Save with session
       await scanner.save({ session });
       
-      console.log(`✅ System request created for ${user.userId} with ID: ${scanner._id}`);
+      console.log(`✅ ₹${amount} system request created for ${user.userId} with QR: ${qrPath}`);
       console.log(`   Status: ${scanner.status}, Expires: ${scanner.expiresAt}`);
 
       createdRequests.push(scanner);
@@ -444,6 +451,7 @@ exports.createSystemRequest = async (req, res) => {
         user.autoRequest.firstRequestAmount = amount;
         user.autoRequest.firstRequestCreatedAt = new Date();
         user.autoRequest.firstRequestExpiresAt = expiresAt;
+        user.autoRequest.firstRequestType = requestType;  // ✅ Store type
       }
       
       await user.save({ session });
@@ -455,12 +463,12 @@ exports.createSystemRequest = async (req, res) => {
     // ✅ Build response message
     let message = '';
     if (isAllUsers) {
-      message = `System requests of ₹${amount} created for ${createdRequests.length} users`;
+      message = `₹${amount} system requests created for ${createdRequests.length} users`;
       if (skippedUsers.length > 0) {
         message += ` (Skipped ${skippedUsers.length} users who already have active requests: ${skippedUsers.join(', ')})`;
       }
     } else {
-      message = `System request of ₹${amount} created for user ${targetUsers[0]?.userId}`;
+      message = `₹${amount} system request created for user ${targetUsers[0]?.userId}`;
     }
 
     res.json({
@@ -471,7 +479,8 @@ exports.createSystemRequest = async (req, res) => {
       totalTargeted: targetUsers.length,
       skippedUsers: skippedUsers,
       groupId: groupRequestId,
-      isAllUsers: isAllUsers
+      isAllUsers: isAllUsers,
+      amount: amount
     });
 
   } catch (error) {

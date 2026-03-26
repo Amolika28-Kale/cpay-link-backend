@@ -245,7 +245,13 @@ const scannerSchema = new mongoose.Schema(
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     default: null
-  }
+  },
+  // ✅ Add this field
+  requestType: {
+    type: String,
+    enum: ["2000", "1000"],
+    default: "2000"
+  },
 },
 { timestamps: true }
 );
