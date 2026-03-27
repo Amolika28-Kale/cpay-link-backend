@@ -24,26 +24,22 @@ const app = express();
 // JSON parser
 app.use(express.json());
 
-// CORS (Mobile + Web Compatible)
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-      "https://cpay-link.netlify.app",
-      "https://cpaylink.io",
-      "www.cpaylink.io",
-      "https://www.cpaylink.io",
+const corsOptions = {
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174", 
+    "http://localhost:5175",
+    "https://cpay-link.netlify.app",
+    "https://cpaylink.io",
+    "https://www.cpaylink.io",  // ✅ removed the duplicate without https://
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+};
 
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-// Handle preflight requests
-app.options(/.*/, cors());
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));  // ✅ regex wildcard, no PathError
 
 // Static folder
 app.use("/uploads", express.static("uploads"));
