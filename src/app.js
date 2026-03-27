@@ -24,22 +24,36 @@ const app = express();
 // JSON parser
 app.use(express.json());
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174", 
+  "http://localhost:5175",
+  "https://cpay-link.netlify.app",
+  "https://cpaylink.io",
+  "https://www.cpaylink.io",
+  "https://cpay-link-backend.up.railway.app",
+];
+
 const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174", 
-    "http://localhost:5175",
-    "https://cpay-link.netlify.app",
-    "https://cpaylink.io",
-    "https://www.cpaylink.io",  // ✅ removed the duplicate without https://
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('Blocked origin:', origin);
+      callback(null, false); // ❌ Block instead of error
+      // OR callback(new Error('Not allowed by CORS')); // ❌ Error
+    }
+  },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 };
 
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));  // ✅ regex wildcard, no PathError
+app.options(/.*/, cors(corsOptions));
 
 // Static folder
 app.use("/uploads", express.static("uploads"));
