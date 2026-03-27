@@ -18,9 +18,13 @@ const levelSchema = new mongoose.Schema({
 
 // ========== NOTIFICATION SCHEMA ==========
 const notificationSchema = new mongoose.Schema({
-  type: { type: String, enum: ['LEVEL_UNLOCKED', 'NEW_USER_ADDED' , 'UTR_REQUESTED'], required: true },
+  type: { 
+    type: String, 
+    enum: ['LEVEL_UNLOCKED', 'NEW_USER_ADDED', 'UTR_REQUESTED'], 
+    required: true 
+  },
   message: { type: String, required: true },
-  legNumber: { type: Number, required: true },
+  legNumber: { type: Number, default: 0 },  // ✅ Default 0, not required
   level: { type: Number },
   data: { type: mongoose.Schema.Types.Mixed },
   read: { type: Boolean, default: false },
@@ -177,12 +181,13 @@ userSchema.pre('save', async function() {
 
 
 
-userSchema.methods.addNotification = function(type, message, legNumber = null, level = null, data = {}) {
+userSchema.methods.addNotification = function(type, message, legNumber = 0, level = null, data = {}) {
   if (!this.notifications) this.notifications = [];
+  
   this.notifications.push({ 
     type, 
     message, 
-    legNumber, 
+    legNumber: legNumber || 0,  // ✅ Always a number
     level, 
     data, 
     read: false, 
