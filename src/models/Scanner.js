@@ -173,10 +173,12 @@ const scannerSchema = new mongoose.Schema(
     required: true
   },
 
-  image: {
-    type: String,
-    required: true
-  },
+// ✅ नवीन
+image: {
+  type: String,
+  required: false,
+  default: null
+},
 
   upiLink: {
     type: String,

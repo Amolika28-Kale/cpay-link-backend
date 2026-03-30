@@ -1108,25 +1108,29 @@ if (user.totalAcceptedRequests <= user.totalPayRequests) {
       });
     }
 
-    // ========== 3. FILE VALIDATION ==========
-    if (!req.file) {
-      return res.status(400).json({ message: "QR code image is required" });
-    }
+// ========== 3. FILE VALIDATION ==========
+const upiLink = req.body.upiLink || "";
+if (!req.file && !upiLink.trim()) {
+  return res.status(400).json({ 
+    message: "Please provide either UPI ID or QR code image" 
+  });
+}
 
-    // ✅ File type validation
-    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!allowedMimeTypes.includes(req.file.mimetype)) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ 
-        message: "Invalid file type. Please upload QR code image (JPEG, PNG)" 
-      });
-    }
+// ✅ File असेल तरच file validation करा
+if (req.file) {
+  const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (!allowedMimeTypes.includes(req.file.mimetype)) {
+    fs.unlinkSync(req.file.path);
+    return res.status(400).json({ 
+      message: "Invalid file type. Please upload QR code image (JPEG, PNG)" 
+    });
+  }
 
-    // ✅ File size validation (max 5MB)
-    if (req.file.size > 5 * 1024 * 1024) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({ message: "File too large. Maximum size is 5MB" });
-    }
+  if (req.file.size > 5 * 1024 * 1024) {
+    fs.unlinkSync(req.file.path);
+    return res.status(400).json({ message: "File too large. Maximum size is 5MB" });
+  }
+}
 
     // // ========== 4. BALANCE CHECK ==========
     // // Get user's INR wallet
@@ -1204,11 +1208,12 @@ if (availableINR < requestAmount) {
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
+// ✅ नवीन
 const scanner = await Scanner.create({
   user: userId,
   amount: requestAmount,
-  image: `/uploads/${req.file.filename}`,
-  upiLink: req.body.upiLink || "",
+  image: req.file ? `/uploads/${req.file.filename}` : null,  // ✅ optional
+  upiLink: upiLink,
   status: "ACTIVE",
   expiresAt: expiresAt,
   isAutoRequest: false
