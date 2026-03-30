@@ -31,7 +31,7 @@ const allowedOrigins = [
   "https://cpay-link.netlify.app",
   "https://cpaylink.io",
   "https://www.cpaylink.io",
-  "https://cpay-link-backend-production.up.railway.app",
+  "https://cpay-link-backend.onrender.com",
 ];
 
 const corsOptions = {
