@@ -320,7 +320,7 @@ exports.getAllUsers = async (req, res) => {
 };
 
 /**
- * CREATE SYSTEM REQUEST (Admin only)
+ * CREATE SYSTEM REQUEST (Admin only) - OPTIMIZED VERSION
  * POST /api/admin/create-system-request
  * Body: { userId: "user123" or "all", amount: 2000 }
  */
@@ -330,16 +330,30 @@ exports.createSystemRequest = async (req, res) => {
 
   try {
     const { userId, amount = 2000 } = req.body;
+    const startTime = Date.now();
 
-    console.log("Creating system request for:", userId, "amount:", amount);
+    console.log("🚀 Creating system request for:", userId, "amount:", amount);
+
+    // ✅ Validate amount
+    if (![1000, 2000].includes(amount)) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be either 1000 or 2000"
+      });
+    }
 
     let targetUsers = [];
     let isAllUsers = false;
 
-    // ✅ Case 1: Send to ALL users
+    // ✅ Step 1: Fetch users (optimized with lean())
     if (userId === 'all' || userId === 'ALL' || userId === 'all-users') {
       isAllUsers = true;
-      targetUsers = await User.find({ role: 'user' }).session(session);
+      targetUsers = await User.find({ role: 'user' })
+        .select('_id userId autoRequest')
+        .lean()
+        .session(session);
       
       if (targetUsers.length === 0) {
         await session.abortTransaction();
@@ -349,23 +363,31 @@ exports.createSystemRequest = async (req, res) => {
           message: "No users found" 
         });
       }
-      console.log(`Creating requests for ${targetUsers.length} users`);
-    } 
-    // ✅ Case 2: Send to specific user
-    else {
+      console.log(`📊 Found ${targetUsers.length} total users`);
+    } else {
+      // Single user lookup - try multiple identifiers
       let user = null;
       
-      // Try to find by userId (string field)
-      user = await User.findOne({ userId: userId }).session(session);
+      // Try by userId (string field)
+      user = await User.findOne({ userId: userId })
+        .select('_id userId autoRequest')
+        .lean()
+        .session(session);
       
-      // If not found and userId looks like a valid ObjectId, try by _id
+      // Try by _id if valid ObjectId
       if (!user && mongoose.Types.ObjectId.isValid(userId)) {
-        user = await User.findById(userId).session(session);
+        user = await User.findById(userId)
+          .select('_id userId autoRequest')
+          .lean()
+          .session(session);
       }
       
-      // If still not found, try by email
+      // Try by email
       if (!user) {
-        user = await User.findOne({ email: userId }).session(session);
+        user = await User.findOne({ email: userId })
+          .select('_id userId autoRequest')
+          .lean()
+          .session(session);
       }
       
       if (!user) {
@@ -380,116 +402,142 @@ exports.createSystemRequest = async (req, res) => {
       targetUsers = [user];
     }
 
-    // ✅ FIX: Get current time and add 10 minutes
+    // ✅ Step 2: Check existing active requests in ONE query (optimized)
+    const userIds = targetUsers.map(u => u._id);
+    
+    const existingActiveRequests = await Scanner.find({
+      createdFor: { $in: userIds },
+      isAutoRequest: true,
+      status: { $in: ["ACTIVE", "ACCEPTED", "PAYMENT_SUBMITTED"] }
+    })
+    .select('createdFor')
+    .lean()
+    .session(session);
+
+    const activeUserIds = new Set(existingActiveRequests.map(r => r.createdFor.toString()));
+    
+    // Filter users without active requests
+    const eligibleUsers = targetUsers.filter(u => !activeUserIds.has(u._id.toString()));
+    const skippedUsers = targetUsers.filter(u => activeUserIds.has(u._id.toString())).map(u => u.userId);
+
+    console.log(`✅ Eligible: ${eligibleUsers.length}, Skipped: ${skippedUsers.length}`);
+
+    if (eligibleUsers.length === 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.json({
+        success: true,
+        message: `All ${targetUsers.length} users already have active requests`,
+        totalCreated: 0,
+        totalTargeted: targetUsers.length,
+        skippedUsers: skippedUsers,
+        processingTimeMs: Date.now() - startTime
+      });
+    }
+
+    // ✅ Step 3: Prepare data for bulk operations
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes from now
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes
     
-    console.log("Current time:", now.toISOString());
-    console.log("Expires at:", expiresAt.toISOString());
-    
-    // ✅ DYNAMIC QR PATH - येथे बदल करा
-    // Amount नुसार QR path select करा
+    // Dynamic QR path based on amount
     const qrPath = amount === 2000 
       ? "/uploads/auto-request-qr.png"
       : "/uploads/auto-request-qr-1000.png";
     
     const requestType = amount === 2000 ? "2000" : "1000";
     const createdByAdmin = req.user && req.user.id ? req.user.id : null;
-    
-    // ✅ Create a group ID for all requests in this batch
     const groupRequestId = isAllUsers ? new mongoose.Types.ObjectId() : null;
+
+    // ✅ Step 4: Bulk insert scanners (ONE database call)
+    const scannerDocuments = eligibleUsers.map(user => ({
+      user: null,
+      amount: amount,
+      image: qrPath,
+      status: "ACTIVE",
+      expiresAt: expiresAt,
+      isAutoRequest: true,
+      autoRequestCycle: 1,
+      requestType: requestType,
+      createdFor: user._id,
+      createdByAdmin: createdByAdmin,
+      groupRequestId: groupRequestId,
+      createdAt: now,
+      updatedAt: now
+    }));
+
+    const insertedScanners = await Scanner.insertMany(scannerDocuments, { session });
+    console.log(`✅ Created ${insertedScanners.length} requests in ${Date.now() - startTime}ms`);
+
+    // ✅ Step 5: Bulk update users (ONE database call)
+    const userUpdates = [];
     
-    const createdRequests = [];
-    const skippedUsers = [];
-
-    // ✅ Create a separate request for each user
-    for (const user of targetUsers) {
-      // Check if user already has an active system request
-      const existingActive = await Scanner.findOne({
-        createdFor: user._id,
-        isAutoRequest: true,
-        status: { $in: ["ACTIVE", "ACCEPTED", "PAYMENT_SUBMITTED"] }
-      }).session(session);
+    insertedScanners.forEach((scanner, index) => {
+      const user = eligibleUsers[index];
       
-      if (existingActive) {
-        console.log(`User ${user.userId} already has an active request, skipping...`);
-        skippedUsers.push(user.userId);
-        continue;
-      }
-      
-      // ✅ Create system request with proper fields
-      const scanner = new Scanner({
-        user: null, // System request
-        amount: amount,
-        image: qrPath,  // ✅ Dynamic QR path
-        status: "ACTIVE",
-        expiresAt: expiresAt,
-        isAutoRequest: true,
-        autoRequestCycle: 1,
-        requestType: requestType,  // ✅ Store request type
-        createdFor: user._id,
-        createdByAdmin: createdByAdmin,
-        groupRequestId: groupRequestId
+      userUpdates.push({
+        updateOne: {
+          filter: { _id: user._id },
+          update: {
+            $set: {
+              'autoRequest.firstRequestCreated': true,
+              'autoRequest.firstRequestId': scanner._id,
+              'autoRequest.firstRequestAmount': amount,
+              'autoRequest.firstRequestCreatedAt': now,
+              'autoRequest.firstRequestExpiresAt': expiresAt,
+              'autoRequest.firstRequestType': requestType
+            }
+          }
+        }
       });
+    });
 
-      // ✅ Save with session
-      await scanner.save({ session });
-      
-      console.log(`✅ ₹${amount} system request created for ${user.userId} with QR: ${qrPath}`);
-      console.log(`   Status: ${scanner.status}, Expires: ${scanner.expiresAt}`);
-
-      createdRequests.push(scanner);
-
-      // Update user's auto request status
-      if (!user.autoRequest) {
-        user.autoRequest = {};
-      }
-      
-      if (!user.autoRequest.firstRequestCreated) {
-        user.autoRequest.firstRequestCreated = true;
-        user.autoRequest.firstRequestId = scanner._id;
-        user.autoRequest.firstRequestAmount = amount;
-        user.autoRequest.firstRequestCreatedAt = new Date();
-        user.autoRequest.firstRequestExpiresAt = expiresAt;
-        user.autoRequest.firstRequestType = requestType;  // ✅ Store type
-      }
-      
-      await user.save({ session });
+    if (userUpdates.length > 0) {
+      await User.bulkWrite(userUpdates, { session });
     }
 
+    // ✅ Step 6: Commit transaction
     await session.commitTransaction();
     session.endSession();
 
-    // ✅ Build response message
+    const totalTime = Date.now() - startTime;
+    console.log(`✨ System request creation completed in ${totalTime}ms`);
+
+    // ✅ Build response
     let message = '';
     if (isAllUsers) {
-      message = `₹${amount} system requests created for ${createdRequests.length} users`;
+      message = `₹${amount} system requests created for ${insertedScanners.length} users`;
       if (skippedUsers.length > 0) {
-        message += ` (Skipped ${skippedUsers.length} users who already have active requests: ${skippedUsers.join(', ')})`;
+        message += ` (Skipped ${skippedUsers.length} users with active requests)`;
       }
     } else {
-      message = `₹${amount} system request created for user ${targetUsers[0]?.userId}`;
+      message = `₹${amount} system request created for user ${eligibleUsers[0]?.userId}`;
     }
 
     res.json({
       success: true,
       message: message,
-      requests: createdRequests,
-      totalCreated: createdRequests.length,
+      totalCreated: insertedScanners.length,
       totalTargeted: targetUsers.length,
       skippedUsers: skippedUsers,
       groupId: groupRequestId,
       isAllUsers: isAllUsers,
-      amount: amount
+      amount: amount,
+      processingTimeMs: totalTime,
+      expiresAt: expiresAt
     });
 
   } catch (error) {
+    // Rollback transaction on error
     await session.abortTransaction();
     session.endSession();
-    console.error("Error creating system request:", error);
+    
+    console.error("❌ Error creating system request:", error);
+    console.error("Error stack:", error.stack);
+    
     res.status(500).json({ 
       success: false, 
-      message: error.message 
+      message: error.message,
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };

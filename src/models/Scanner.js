@@ -264,5 +264,9 @@ scannerSchema.index({ isAutoRequest: 1, status: 1 });
 scannerSchema.index({ user: 1 });
 scannerSchema.index({ createdFor: 1 });
 scannerSchema.index({ status: 1, expiresAt: 1 }); // हा पण add करा
+// Add these indexes to your scannerSchema
+scannerSchema.index({ createdFor: 1, status: 1, isAutoRequest: 1 });
+scannerSchema.index({ groupRequestId: 1 }); // Add this if you plan to use groupRequestId
+scannerSchema.index({ status: 1, isAutoRequest: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Scanner", scannerSchema);
