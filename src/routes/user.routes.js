@@ -177,7 +177,7 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
     const { memberId } = req.params;
     const currentUserId = req.user.id;
     
-    console.log("🔍 Fetching member details for ID:", memberId);
+    // console.log("🔍 Fetching member details for ID:", memberId);
     
     // Validate memberId
     if (!memberId || memberId === 'undefined' || memberId === 'null') {
@@ -207,7 +207,7 @@ router.get('/member-details/:memberId', userAuth, async (req, res) => {
       });
     }
     
-    console.log(`✅ Member found: ${member.userId}`);
+    // console.log(`✅ Member found: ${member.userId}`);
     
     const directReferralsCount = member.legs?.length || 0;
     const unlockedLevelsCount = directReferralsCount;
@@ -322,7 +322,7 @@ if (leg.levels?.[`level${level}`]?.users?.some(u => u.toString() === member._id.
         description: tx.meta?.description || tx.type
       }));
     } catch (txError) {
-      console.log("No transactions found:", txError.message);
+      // console.log("No transactions found:", txError.message);
       memberDetails.recentActivity = [];
     }
     
@@ -581,7 +581,7 @@ router.get('/leg-users/:legNumber/:level', userAuth, async (req, res) => {
   }
 });
 
-// ========== SIMPLIFIED: GET TODAY'S TEAM STATS ==========
+// ========== SIMPLIFIED & FIXED: GET TODAY'S TEAM STATS ==========
 router.get('/today-team-stats', userAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -590,45 +590,99 @@ router.get('/today-team-stats', userAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
     
-    // Get today's date range
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Get today's date range (START of today)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
     
-    // Get all users in downline
-    const allDownlineIds = [];
-    for (const leg of user.legs || []) {
-      for (let level = 1; level <= 21; level++) {
-        const usersAtLevel = leg.levels?.[`level${level}`]?.users || [];
-        allDownlineIds.push(...usersAtLevel);
+    // Get END of today (now)
+    const now = new Date();
+    
+    // console.log(`📅 Today's range: ${todayStart.toISOString()} to ${now.toISOString()}`);
+    // console.log(`👤 User: ${user.userId}, Directs: ${user.directReferralsCount}`);
+    
+    // Method 1: Get all ACCEPTED requests by this user TODAY
+    const Scanner = mongoose.model('Scanner');
+    const todayAcceptedRequests = await Scanner.find({
+      acceptedBy: user._id,
+      status: 'ACCEPTED',
+      acceptedAt: { 
+        $gte: todayStart, 
+        $lte: now 
       }
-    }
+    }).lean();
     
-    // Get today's transactions for these users
-    const todayTransactions = await Transaction.find({
-      user: { $in: allDownlineIds },
-      createdAt: { $gte: today, $lt: tomorrow },
-      type: { $in: ['TEAM_CASHBACK'] }
+    // console.log(`✅ Accepted requests today: ${todayAcceptedRequests.length}`);
+    todayAcceptedRequests.forEach(req => {
+      // console.log(`   - ₹${req.amount} at ${req.acceptedAt}`);
     });
     
-    const teamBusiness = todayTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    // Method 2: Get TEAM_CASHBACK transactions from today
+    const todayTransactions = await Transaction.find({
+      user: user._id,  // Transactions FOR this user
+      type: 'TEAM_CASHBACK',
+      createdAt: { 
+        $gte: todayStart, 
+        $lte: now 
+      }
+    }).lean();
     
-    // Calculate your commission (simplified - average 10% of team business)
-    const yourCommission = teamBusiness * 0.1;
+    // console.log(`💰 Team cashback transactions today: ${todayTransactions.length}`);
+    todayTransactions.forEach(tx => {
+      // console.log(`   - ₹${tx.amount} from ${tx.fromWallet || 'team'}`);
+    });
     
-    // Count active members today
+    // Calculate team business from accepted requests
+    const teamBusinessFromAccepted = todayAcceptedRequests.reduce((sum, req) => sum + (req.amount || 0), 0);
+    
+    // Calculate team business from cashback transactions
+    const teamBusinessFromCashback = todayTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    
+    // Total team business = accepted amounts + cashback amounts
+    const totalTeamBusiness = teamBusinessFromAccepted + teamBusinessFromCashback;
+    
+    // Your commission is 10% of team business (as per your rates)
+    const yourCommission = totalTeamBusiness * 0.1;
+    
+    // Get unique team members who were active today
     const activeMemberIds = new Set();
-    todayTransactions.forEach(tx => activeMemberIds.add(tx.user.toString()));
+    
+    // Add users from accepted requests
+    todayAcceptedRequests.forEach(req => {
+      if (req.user && req.user.toString() !== user._id.toString()) {
+        activeMemberIds.add(req.user.toString());
+      }
+    });
+    
+    // Add users from transactions
+    todayTransactions.forEach(tx => {
+      if (tx.fromWallet && tx.fromWallet !== 'SYSTEM') {
+        // Extract user ID from metadata if available
+        if (tx.meta && tx.meta.userId) {
+          activeMemberIds.add(tx.meta.userId);
+        }
+      }
+    });
+    
+    const result = {
+      teamBusiness: parseFloat(totalTeamBusiness.toFixed(2)),
+      yourCommission: parseFloat(yourCommission.toFixed(2)),
+      teamMembers: activeMemberIds.size,
+      transactions: todayAcceptedRequests.length + todayTransactions.length,
+      breakdown: {
+        fromAccepted: parseFloat(teamBusinessFromAccepted.toFixed(2)),
+        fromCashback: parseFloat(teamBusinessFromCashback.toFixed(2))
+      },
+      details: {
+        acceptedRequests: todayAcceptedRequests.map(r => ({ amount: r.amount, at: r.acceptedAt })),
+        cashbackTransactions: todayTransactions.map(t => ({ amount: t.amount, at: t.createdAt }))
+      }
+    };
+    
+    // console.log("📊 FINAL TODAY'S STATS:", result);
     
     res.json({
       success: true,
-      data: {
-        teamBusiness,
-        yourCommission,
-        teamMembers: activeMemberIds.size,
-        transactions: todayTransactions.length
-      }
+      data: result
     });
     
   } catch (error) {
@@ -637,44 +691,76 @@ router.get('/today-team-stats', userAuth, async (req, res) => {
   }
 });
 
+// ========== FIXED: GET TOTAL TEAM STATS ==========
 router.get('/total-team-stats', userAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-
+    
     if (!user) {
-      return res.status(404).json({ success: false });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
-
-    // 🔥 All downline IDs
-    const allDownlineIds = [];
-    for (const leg of user.legs || []) {
-      for (let level = 1; level <= 21; level++) {
-        const usersAtLevel = leg.levels?.[`level${level}`]?.users || [];
-        allDownlineIds.push(...usersAtLevel);
+    
+    // console.log(`📊 Fetching TOTAL stats for user: ${user.userId}`);
+    
+    // Get ALL accepted requests by this user
+    const Scanner = mongoose.model('Scanner');
+    const allAcceptedRequests = await Scanner.find({
+      acceptedBy: user._id,
+      status: 'ACCEPTED'
+    }).lean();
+    
+    // console.log(`✅ Total accepted requests (all time): ${allAcceptedRequests.length}`);
+    
+    // Get ALL TEAM_CASHBACK transactions for this user
+    const allTransactions = await Transaction.find({
+      user: user._id,
+      type: 'TEAM_CASHBACK'
+    }).lean();
+    
+    // console.log(`💰 Total cashback transactions (all time): ${allTransactions.length}`);
+    
+    // Calculate totals
+    const teamBusinessFromAccepted = allAcceptedRequests.reduce((sum, req) => sum + (req.amount || 0), 0);
+    const teamBusinessFromCashback = allTransactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    const totalTeamBusiness = teamBusinessFromAccepted + teamBusinessFromCashback;
+    const totalYourCommission = totalTeamBusiness * 0.1;
+    
+    // Get total unique team members
+    const allTeamMemberIds = new Set();
+    
+    allAcceptedRequests.forEach(req => {
+      if (req.user && req.user.toString() !== user._id.toString()) {
+        allTeamMemberIds.add(req.user.toString());
       }
-    }
-
-    // 🔥 NO DATE FILTER
-    const transactions = await Transaction.find({
-      user: { $in: allDownlineIds },
-      type: { $in: ['TEAM_CASHBACK'] }
     });
-
-    const teamBusiness = transactions.reduce((sum, tx) => sum + (tx.amount || 0), 0);
-    const yourCommission = teamBusiness * 0.1;
-
+    
+    allTransactions.forEach(tx => {
+      if (tx.meta && tx.meta.userId) {
+        allTeamMemberIds.add(tx.meta.userId);
+      }
+    });
+    
+    const result = {
+      teamBusiness: parseFloat(totalTeamBusiness.toFixed(2)),
+      yourCommission: parseFloat(totalYourCommission.toFixed(2)),
+      teamMembers: allTeamMemberIds.size,
+      totalTransactions: allAcceptedRequests.length + allTransactions.length,
+      breakdown: {
+        fromAccepted: parseFloat(teamBusinessFromAccepted.toFixed(2)),
+        fromCashback: parseFloat(teamBusinessFromCashback.toFixed(2))
+      }
+    };
+    
+    // console.log("📊 FINAL TOTAL STATS:", result);
+    
     res.json({
       success: true,
-      data: {
-        teamBusiness,
-        yourCommission,
-        totalTransactions: transactions.length
-      }
+      data: result
     });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false });
+    
+  } catch (error) {
+    console.error("Error fetching total stats:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
