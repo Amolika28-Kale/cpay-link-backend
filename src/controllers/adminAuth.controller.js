@@ -229,69 +229,7 @@ exports.deleteAdmin = async (req, res) => {
   }
 };
 
-// ================= SEED ADMIN =================
-exports.seedAdmin = async () => {
-  try {
-    // Check for existing 6-digit admin IDs
-    const existingAdmin = await Admin.findOne({ 
-      $or: [
-        { adminId: '777777' },
-        { adminId: '888888' },
-        { adminId: '999999' }
-      ]
-    });
-    
-    if (!existingAdmin) {
-      // Create main admin
-      await Admin.create({
-        adminId: '777777',
-        pin: '123456',
-        name: 'Admin',
-        role: 'admin',
-        permissions: ['all']
-      });
 
-      // Create finance admin
-      await Admin.create({
-        adminId: '888888',
-        pin: '123456',
-        name: 'Finance Admin',
-        role: 'admin',
-        permissions: ['deposits', 'withdrawals']
-      });
-
-      // Create support admin
-      await Admin.create({
-        adminId: '999999',
-        pin: '123456',
-        name: 'Support Admin',
-        role: 'admin',
-        permissions: ['users', 'scanners']
-      });
-
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('✅ ADMINS SEEDED SUCCESSFULLY!');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📋 Admin ID: 777777 | PIN: 123456 | Role: Admin');
-      console.log('📋 Admin ID: 888888 | PIN: 123456 | Role: Finance Admin');
-      console.log('📋 Admin ID: 999999 | PIN: 123456 | Role: Support Admin');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━');
-    } else {
-      console.log('✅ Admins already exist');
-      
-      // Show existing admins
-      const admins = await Admin.find().select('-pin');
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📋 Existing Admins:');
-      admins.forEach(admin => {
-        console.log(`   ${admin.adminId} - ${admin.name || 'Admin'} (${admin.role})`);
-      });
-      console.log('━━━━━━━━━━━━━━━━━━━━━━━');
-    }
-  } catch (err) {
-    console.error('❌ Error seeding admin:', err);
-  }
-};
 
 // ================= SYSTEM REQUEST MANAGEMENT =================
 
