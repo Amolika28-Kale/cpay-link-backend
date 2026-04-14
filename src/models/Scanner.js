@@ -254,6 +254,24 @@ image: {
     enum: ["2000", "1000"],
     default: "2000"
   },
+// ✅ QR Update Request fields (add these)
+  qrUpdateRequested: {
+    type: Boolean,
+    default: false
+  },
+  qrUpdateRequestedAt: {
+    type: Date,
+    default: null
+  },
+  qrUpdateRequestedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null
+  },
+  qrUpdateMessage: {
+    type: String,
+    default: null
+  }
 },
 { timestamps: true }
 );

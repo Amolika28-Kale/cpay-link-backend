@@ -2105,58 +2105,184 @@ exports.cancelRequest = async (req, res) => {
   }
 };
 
+// controllers/scannerController.js
 
 /* =========================================================
-   REQUEST UTR SCREENSHOT (Notify uploader)
+   REQUEST QR UPDATE (Acceptor requests creator)
 ========================================================= */
+exports.requestQRUpdate = async (req, res) => {
+  try {
+    const { scannerId } = req.body;
+    const userId = req.user.id;
 
+    const scanner = await Scanner.findById(scannerId);
+    if (!scanner) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    // Check if user is the acceptor
+    if (!scanner.acceptedBy || scanner.acceptedBy.toString() !== userId) {
+      return res.status(403).json({ message: "Only acceptor can request QR update" });
+    }
+
+    // ✅ Check status - can request in ACCEPTED or PAYMENT_SUBMITTED state
+    if (!["ACCEPTED", "PAYMENT_SUBMITTED"].includes(scanner.status)) {
+      return res.status(400).json({ message: "Cannot request QR update in current state" });
+    }
+
+    // Update scanner with request
+    scanner.qrUpdateRequested = true;
+    scanner.qrUpdateRequestedAt = new Date();
+    scanner.qrUpdateRequestedBy = userId;
+    scanner.qrUpdateMessage = "Please upload a valid, scannable QR code image";
+    await scanner.save();
+
+    // Notify creator
+    const creator = await User.findById(scanner.user);
+    if (creator) {
+      creator.addNotification(
+        'QR_UPDATE_REQUESTED',
+        `📷 Acceptor requested valid QR for ₹${scanner.amount} request. Please update.`,
+        0,
+        null,
+        { scannerId: scanner._id, amount: scanner.amount }
+      );
+      await creator.save();
+      console.log(`✅ QR update notification sent to creator: ${creator.userId}`);
+    }
+
+    res.json({ 
+      message: "QR update request sent to creator",
+      scanner: { id: scanner._id, qrUpdateRequested: true }
+    });
+
+  } catch (err) {
+    console.error("QR update request error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// controllers/scannerController.js - updateQRImage function
+
+exports.updateQRImage = async (req, res) => {
+  try {
+    const { scannerId } = req.body;
+    const userId = req.user.id;
+
+    const scanner = await Scanner.findById(scannerId);
+    if (!scanner) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    // Only creator can update
+    if (scanner.user.toString() !== userId) {
+      return res.status(403).json({ message: "Only creator can update QR image" });
+    }
+
+    // ✅ CHANGE: Allow update in ACTIVE or ACCEPTED status
+    if (!["ACTIVE", "ACCEPTED"].includes(scanner.status)) {
+      return res.status(400).json({ 
+        message: "Cannot update QR after payment is submitted or completed" 
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: "New QR image required" });
+    }
+
+    // Validate file type
+    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedMimeTypes.includes(req.file.mimetype)) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ message: "Invalid file type. Upload JPEG, PNG or WEBP" });
+    }
+
+    // Save old QR path
+    const oldImagePath = scanner.image;
+
+    // Update QR
+    scanner.image = `/uploads/${req.file.filename}`;
+    scanner.qrUpdateRequested = false;
+    scanner.qrUpdateMessage = null;
+    await scanner.save();
+
+    // Delete old file
+    if (oldImagePath && oldImagePath !== `/uploads/${req.file.filename}`) {
+      try {
+        if (fs.existsSync(`.${oldImagePath}`)) {
+          fs.unlinkSync(`.${oldImagePath}`);
+        }
+      } catch (e) {
+        console.log("Old QR delete failed:", e.message);
+      }
+    }
+
+    // Notify acceptor if they requested it
+    if (scanner.qrUpdateRequestedBy) {
+      const acceptor = await User.findById(scanner.qrUpdateRequestedBy);
+      if (acceptor) {
+        acceptor.addNotification(
+          'QR_UPDATED',
+          `✅ QR updated for ₹${scanner.amount} request. You can now proceed with payment.`,
+          0,
+          null,
+          { scannerId: scanner._id, amount: scanner.amount }
+        );
+        await acceptor.save();
+        console.log(`✅ QR updated notification sent to acceptor: ${acceptor.userId}`);
+      }
+    }
+
+    res.json({ 
+      message: "QR image updated successfully",
+      image: scanner.image
+    });
+
+  } catch (err) {
+    if (req.file) fs.unlinkSync(req.file.path);
+    console.error("QR update error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+
+/* =========================================================
+   REQUEST UTR SCREENSHOT
+========================================================= */
 exports.requestUTR = async (req, res) => {
   try {
     const { scannerId } = req.body;
     const userId = req.user.id;
 
     const scanner = await Scanner.findById(scannerId);
-
     if (!scanner)
       return res.status(404).json({ message: "Scanner not found" });
 
-    // Only creator can request UTR
     if (scanner.user.toString() !== userId)
       return res.status(403).json({ message: "Only creator can request UTR" });
 
     if (!scanner.acceptedBy)
       return res.status(400).json({ message: "No user accepted this request yet" });
 
-    // ✅ FIX: Get the acceptor user
-    const acceptorId = scanner.acceptedBy;
-    const acceptor = await User.findById(acceptorId);
-    
+    const acceptor = await User.findById(scanner.acceptedBy);
     if (acceptor) {
-      // ✅ Add notification to acceptor's notifications array
+      // ✅ Use addNotification method (UTR_REQUESTED already in enum)
       acceptor.addNotification(
         'UTR_REQUESTED',
-        `📩 UTR Number requested for request #${scanner._id.toString().slice(-6)} (Amount: ₹${scanner.amount}) - Please upload UTR screenshot immediately.`,
-        null, // legNumber not applicable
-        null, // level not applicable
-        { 
-          scannerId: scanner._id, 
-          amount: scanner.amount, 
-          requestedBy: userId,
-          requestedAt: new Date()
-        }
+        `📩 UTR Number requested for request #${scanner._id.toString().slice(-6)} (Amount: ₹${scanner.amount})`,
+        0,
+        null,
+        { scannerId: scanner._id, amount: scanner.amount, requestedBy: userId }
       );
       await acceptor.save();
       console.log(`✅ UTR notification sent to acceptor: ${acceptor.userId}`);
     }
 
-    // Save flag on scanner
     scanner.utrRequested = true;
     scanner.utrRequestedAt = new Date();
     await scanner.save();
 
     res.json({
-      message: "UTR request sent to uploader successfully",
-      notifyUser: acceptorId
+      message: "UTR request sent to uploader successfully"
     });
 
   } catch (err) {

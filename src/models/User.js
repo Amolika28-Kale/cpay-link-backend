@@ -16,15 +16,22 @@ const levelSchema = new mongoose.Schema({
   unlockedAt: { type: Date, default: null }
 }, { _id: false });
 
-// ========== NOTIFICATION SCHEMA ==========
+// models/User.js - notificationSchema madhe enum update kara
 const notificationSchema = new mongoose.Schema({
   type: { 
     type: String, 
-    enum: ['LEVEL_UNLOCKED', 'NEW_USER_ADDED', 'UTR_REQUESTED'], 
+    enum: [
+      'LEVEL_UNLOCKED', 
+      'NEW_USER_ADDED', 
+      'UTR_REQUESTED',
+      // ✅ ADD THESE TWO:
+      'QR_UPDATE_REQUESTED',
+      'QR_UPDATED'
+    ], 
     required: true 
   },
   message: { type: String, required: true },
-  legNumber: { type: Number, default: 0 },  // ✅ Default 0, not required
+  legNumber: { type: Number, default: 0 },
   level: { type: Number },
   data: { type: mongoose.Schema.Types.Mixed },
   read: { type: Boolean, default: false },

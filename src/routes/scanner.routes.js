@@ -131,6 +131,9 @@ router.get("/screenshots/:scannerId", userAuth, scannerController.getScannerScre
 router.post("/update-screenshot", userAuth, upload.single("screenshot"), scannerController.updateScreenshot);
 router.post("/delete-screenshot", userAuth, scannerController.deleteScreenshot);
 
+router.post("/request-qr-update", userAuth, scannerController.requestQRUpdate);
+router.post("/update-qr", userAuth, upload.single("qrImage"), scannerController.updateQRImage);
+
 /* ================= ADMIN ROUTES ================= */
 router.get('/all', adminAuthMiddleware, scannerController.getAllScanners);
 router.post("/request-utr", userAuth, scannerController.requestUTR);

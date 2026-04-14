@@ -14,7 +14,11 @@ const notificationSchema = new mongoose.Schema({
       'LEVEL_UNLOCKED', 
       'LEG_ACTIVATED', 
       'COMMISSION_RECEIVED',
-      'NEW_DIRECT_REFERRAL'
+      'NEW_DIRECT_REFERRAL',
+      // ✅ ADD THESE NEW TYPES
+      'QR_UPDATE_REQUESTED',
+      'QR_UPDATED',
+      'UTR_REQUESTED'
     ],
     required: true
   },
