@@ -2058,12 +2058,11 @@ exports.cancelRequest = async (req, res) => {
     const { scannerId } = req.params;
     const userId = req.user.id;
 
-    // Find the scanner - only if it's ACTIVE and belongs to this user
+    // ✅ ACCEPTED status पण allow करा (जेव्हा cancellationRequested असेल)
     const scanner = await Scanner.findOne({ 
       _id: scannerId,
       user: userId,
-      status: "ACTIVE",
-      acceptedBy: null // Not accepted by anyone
+      status: { $in: ["ACTIVE", "ACCEPTED", "PAYMENT_SUBMITTED"] } // ✅ सगळे allow
     }).session(session);
 
     if (!scanner) {
@@ -2074,20 +2073,18 @@ exports.cancelRequest = async (req, res) => {
       });
     }
 
-    // Update status to EXPIRED
+    // ✅ ACTIVE request - directly cancel (no acceptedBy check)
+    // ✅ ACCEPTED/PAYMENT_SUBMITTED - only if cancellationRequested = true
+    if (scanner.status !== "ACTIVE" && !scanner.cancellationRequested) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ 
+        message: "Cannot cancel: No cancellation request from acceptor" 
+      });
+    }
+
     scanner.status = "EXPIRED";
     await scanner.save({ session });
-
-    // Optional: Refund the amount to user's INR wallet? 
-    // (if amount was deducted at creation time)
-    // Uncomment if you deduct balance at creation
-    /*
-    const inrWallet = await Wallet.findOne({ user: userId, type: "INR" }).session(session);
-    if (inrWallet) {
-      inrWallet.balance += scanner.amount;
-      await inrWallet.save({ session });
-    }
-    */
 
     await session.commitTransaction();
     session.endSession();
@@ -2100,7 +2097,6 @@ exports.cancelRequest = async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    // console.error("Cancel request error:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -2290,3 +2286,62 @@ exports.requestUTR = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+// controllers/scannerController.js - Add this function
+
+/* =========================================================
+   REQUEST CANCELLATION (Acceptor requests creator to cancel)
+========================================================= */
+exports.requestCancellation = async (req, res) => {
+  try {
+    const { scannerId, reason } = req.body;
+    const userId = req.user.id;
+
+    const scanner = await Scanner.findById(scannerId);
+    if (!scanner) {
+      return res.status(404).json({ message: "Request not found" });
+    }
+
+    // Check if user is the acceptor
+    if (!scanner.acceptedBy || scanner.acceptedBy.toString() !== userId) {
+      return res.status(403).json({ message: "Only acceptor can request cancellation" });
+    }
+
+    // Check status
+    if (!["ACCEPTED", "PAYMENT_SUBMITTED"].includes(scanner.status)) {
+      return res.status(400).json({ message: "Cannot request cancellation in current state" });
+    }
+
+    // Update scanner with cancellation request
+    scanner.cancellationRequested = true;
+    scanner.cancellationRequestedAt = new Date();
+    scanner.cancellationRequestedBy = userId;
+    scanner.cancellationReason = reason || "Unable to process payment";
+
+    await scanner.save();
+
+    // Notify creator
+    const creator = await User.findById(scanner.user);
+    if (creator) {
+      creator.addNotification(
+        'CANCELLATION_REQUESTED',
+        `🚫 Acceptor cannot process payment for ₹${scanner.amount}. Reason: ${reason || "Unable to process"}. Please cancel this request.`,
+        0,
+        null,
+        { scannerId: scanner._id, amount: scanner.amount, reason }
+      );
+      await creator.save();
+      console.log(`✅ Cancellation notification sent to creator: ${creator.userId}`);
+    }
+
+    res.json({
+      message: "Cancellation request sent to creator",
+      scanner: { id: scanner._id, cancellationRequested: true }
+    });
+
+  } catch (err) {
+    console.error("Cancellation request error:", err);
+    res.status(500).json({ message: err.message });
+  }
+};
+

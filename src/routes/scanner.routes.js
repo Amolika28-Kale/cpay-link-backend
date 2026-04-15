@@ -96,6 +96,7 @@
 // router.post('/delete-screenshot', auth, scannerController.deleteScreenshot);
 
 
+
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
@@ -123,18 +124,20 @@ router.post("/accept", userAuth, scannerController.acceptRequest);
 router.post("/submit-payment", userAuth, upload.single("screenshot"), scannerController.submitPayment);
 router.post("/confirm", userAuth, scannerController.confirmFinalPayment);
 router.post("/self-pay", userAuth, scannerController.selfPay);
-// Cancel request
-router.delete("/cancel/:scannerId", userAuth, scannerController.cancelRequest);
 
-/* ================= SCREENSHOT MANAGEMENT ROUTES ================= */
-router.get("/screenshots/:scannerId", userAuth, scannerController.getScannerScreenshots);
+// ✅ FIXED: All POST routes with NO params FIRST
 router.post("/update-screenshot", userAuth, upload.single("screenshot"), scannerController.updateScreenshot);
 router.post("/delete-screenshot", userAuth, scannerController.deleteScreenshot);
-
 router.post("/request-qr-update", userAuth, scannerController.requestQRUpdate);
 router.post("/update-qr", userAuth, upload.single("qrImage"), scannerController.updateQRImage);
+router.post("/request-cancellation", userAuth, scannerController.requestCancellation);
+router.post("/request-utr", userAuth, scannerController.requestUTR);
+
+// ✅ FIXED: Routes with :params LAST
+router.delete("/cancel/:scannerId", userAuth, scannerController.cancelRequest);
+router.get("/screenshots/:scannerId", userAuth, scannerController.getScannerScreenshots);
 
 /* ================= ADMIN ROUTES ================= */
 router.get('/all', adminAuthMiddleware, scannerController.getAllScanners);
-router.post("/request-utr", userAuth, scannerController.requestUTR);
+
 module.exports = router;

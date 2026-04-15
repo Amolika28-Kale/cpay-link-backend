@@ -271,6 +271,24 @@ image: {
   qrUpdateMessage: {
     type: String,
     default: null
+  },
+   // ✅ ADD THESE: Cancellation Request fields
+  cancellationRequested: {
+    type: Boolean,
+    default: false
+  },
+  cancellationRequestedAt: {
+    type: Date,
+    default: null
+  },
+  cancellationRequestedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null
+  },
+  cancellationReason: {
+    type: String,
+    default: null
   }
 },
 { timestamps: true }

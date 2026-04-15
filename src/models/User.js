@@ -26,7 +26,8 @@ const notificationSchema = new mongoose.Schema({
       'UTR_REQUESTED',
       // ✅ ADD THESE TWO:
       'QR_UPDATE_REQUESTED',
-      'QR_UPDATED'
+      'QR_UPDATED',
+      'CANCELLATION_REQUESTED',
     ], 
     required: true 
   },
