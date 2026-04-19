@@ -1206,7 +1206,7 @@ if (availableINR < requestAmount) {
 }
     // ========== 5. CREATE SCANNER REQUEST ==========
     const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+    expiresAt.setMinutes(expiresAt.getMinutes() + 30);
 
 // ✅ नवीन
 const scanner = await Scanner.create({

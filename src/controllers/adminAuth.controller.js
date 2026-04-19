@@ -260,25 +260,25 @@ exports.getAllUsers = async (req, res) => {
 /**
  * CREATE SYSTEM REQUEST (Admin only) - OPTIMIZED VERSION
  * POST /api/admin/create-system-request
- * Body: { userId: "user123" or "all", amount: 2000 }
+ * Body: { userId: "user123" or "all", amount: 5000 }
  */
 exports.createSystemRequest = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { userId, amount = 2000 } = req.body;
+    const { userId, amount = 5000 } = req.body;
     const startTime = Date.now();
 
     console.log("🚀 Creating system request for:", userId, "amount:", amount);
 
     // ✅ Validate amount
-    if (![1000, 2000].includes(amount)) {
+    if (![5000, 10000].includes(amount)) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
         success: false,
-        message: "Amount must be either 1000 or 2000"
+        message: "Amount must be either 5000 or 10000"
       });
     }
 
@@ -375,14 +375,14 @@ exports.createSystemRequest = async (req, res) => {
 
     // ✅ Step 3: Prepare data for bulk operations
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 10 minutes
     
     // Dynamic QR path based on amount
-    const qrPath = amount === 2000 
+    const qrPath = amount === 5000 
       ? "/uploads/auto-request-qr.png"
       : "/uploads/auto-request-qr-1000.png";
     
-    const requestType = amount === 2000 ? "2000" : "1000";
+const requestType = amount === 5000 ? "5000" : "10000";
     const createdByAdmin = req.user && req.user.id ? req.user.id : null;
     const groupRequestId = isAllUsers ? new mongoose.Types.ObjectId() : null;
 
@@ -746,7 +746,7 @@ exports.createNextSystemRequest = async (userId, amount) => {
 
     const defaultQRPath = "/uploads/auto-request-qr.png";
     const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+    expiresAt.setMinutes(expiresAt.getMinutes() + 30);
 
     // ✅ FIXED: Create a single document, not an array
     const scanner = await Scanner.create({

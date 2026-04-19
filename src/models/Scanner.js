@@ -230,7 +230,7 @@ image: {
 
   expiresAt: {
     type: Date,
-    default: () => new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+default: () => new Date(Date.now() + 30 * 60 * 1000) // 30 minutes
   },
   
   isAutoRequest: {
@@ -248,12 +248,11 @@ image: {
     ref: "User",
     default: null
   },
-  // ✅ Add this field
-  requestType: {
-    type: String,
-    enum: ["2000", "1000"],
-    default: "2000"
-  },
+requestType: {
+  type: String,
+  enum: ["5000", "10000"],
+  default: "5000"
+},
 // ✅ QR Update Request fields (add these)
   qrUpdateRequested: {
     type: Boolean,
