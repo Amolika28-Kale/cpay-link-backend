@@ -1080,15 +1080,15 @@ exports.requestToPay = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
     
-// if (user.totalAcceptedRequests <= user.totalPayRequests) {
-//   if (req.file) fs.unlinkSync(req.file.path);
-//   return res.status(403).json({
-//     message: "You must accept a payment request before creating a new Pay My Bill request",
-//     totalPayRequests: user.totalPayRequests,
-//     totalAcceptedRequests: user.totalAcceptedRequests,
-//     required: "Accept one request first"
-//   });
-// }
+if (user.totalAcceptedRequests <= user.totalPayRequests) {
+  if (req.file) fs.unlinkSync(req.file.path);
+  return res.status(403).json({
+    message: "You must accept a payment request before creating a new Pay My Bill request",
+    totalPayRequests: user.totalPayRequests,
+    totalAcceptedRequests: user.totalAcceptedRequests,
+    required: "Accept one request first"
+  });
+}
 
     // ========== 2. AMOUNT VALIDATION ==========
     if (!amount || amount <= 0) {
