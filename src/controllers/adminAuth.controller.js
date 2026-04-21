@@ -257,10 +257,11 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
+
 /**
- * CREATE SYSTEM REQUEST (Admin only) - OPTIMIZED VERSION
+ * CREATE SYSTEM REQUEST (Admin only) - WITH CUSTOM AMOUNT & 2-QR LOGIC
  * POST /api/admin/create-system-request
- * Body: { userId: "user123" or "all", amount: 5000 }
+ * Body: { userId: "user123" or "all", amount: 5000 } // ANY AMOUNT NOW
  */
 exports.createSystemRequest = async (req, res) => {
   const session = await mongoose.startSession();
@@ -272,15 +273,35 @@ exports.createSystemRequest = async (req, res) => {
 
     console.log("🚀 Creating system request for:", userId, "amount:", amount);
 
-    // ✅ Validate amount
-    if (![5000, 10000].includes(amount)) {
+    // ✅ Validate amount - allow ANY positive number
+    if (!amount || amount <= 0) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
         success: false,
-        message: "Amount must be either 5000 or 10000"
+        message: "Amount must be a positive number"
       });
     }
+
+    // Optional: Add maximum limit for safety
+    const MAX_AMOUNT = 100000; // ₹1,00,000 max
+    if (amount > MAX_AMOUNT) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Amount cannot exceed ₹${MAX_AMOUNT}`
+      });
+    }
+
+    // ✅ 2-QR LOGIC: Different QR based on amount
+    // QR for amount <= 5000
+    // Different QR for amount > 5000
+    const qrPath = amount <= 5000 
+      ? "/uploads/jagtap-enterprises.png"      // QR for ₹5000 and below
+      : "/uploads/wall-streets-academy.png";    // QR for above ₹5000
+    
+    console.log(`📱 Using QR: ${qrPath} for amount: ₹${amount} (${amount <= 5000 ? 'Upto 5000' : 'Above 5000'} category)`);
 
     let targetUsers = [];
     let isAllUsers = false;
@@ -375,27 +396,21 @@ exports.createSystemRequest = async (req, res) => {
 
     // ✅ Step 3: Prepare data for bulk operations
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(now.getTime() + 30 * 60 * 1000); // 30 minutes
     
-    // Dynamic QR path based on amount
-    const qrPath = amount === 5000 
-      ? "/uploads/auto-request-qr.png"
-      : "/uploads/auto-request-qr-1000.png";
-    
-const requestType = amount === 5000 ? "5000" : "10000";
     const createdByAdmin = req.user && req.user.id ? req.user.id : null;
     const groupRequestId = isAllUsers ? new mongoose.Types.ObjectId() : null;
 
     // ✅ Step 4: Bulk insert scanners (ONE database call)
     const scannerDocuments = eligibleUsers.map(user => ({
       user: null,
-      amount: amount,
-      image: qrPath,
+      amount: amount,  // ✅ CUSTOM AMOUNT
+      image: qrPath,   // ✅ DYNAMIC QR based on amount range
       status: "ACTIVE",
       expiresAt: expiresAt,
       isAutoRequest: true,
       autoRequestCycle: 1,
-      requestType: requestType,
+      requestType: "custom",  // ✅ Changed to "custom"
       createdFor: user._id,
       createdByAdmin: createdByAdmin,
       groupRequestId: groupRequestId,
@@ -419,10 +434,11 @@ const requestType = amount === 5000 ? "5000" : "10000";
             $set: {
               'autoRequest.firstRequestCreated': true,
               'autoRequest.firstRequestId': scanner._id,
-              'autoRequest.firstRequestAmount': amount,
+              'autoRequest.firstRequestAmount': amount,  // ✅ CUSTOM AMOUNT
               'autoRequest.firstRequestCreatedAt': now,
               'autoRequest.firstRequestExpiresAt': expiresAt,
-              'autoRequest.firstRequestType': requestType
+              'autoRequest.firstRequestType': "custom",
+              'autoRequest.firstRequestQR': qrPath  // ✅ Store which QR was used
             }
           }
         }
@@ -460,6 +476,8 @@ const requestType = amount === 5000 ? "5000" : "10000";
       groupId: groupRequestId,
       isAllUsers: isAllUsers,
       amount: amount,
+      qrUsed: qrPath,                    // ✅ Tell which QR was used
+      qrCategory: amount <= 5000 ? "upto-5000" : "above-5000",  // ✅ QR category
       processingTimeMs: totalTime,
       expiresAt: expiresAt
     });

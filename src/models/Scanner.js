@@ -248,10 +248,15 @@ default: () => new Date(Date.now() + 30 * 60 * 1000) // 30 minutes
     ref: "User",
     default: null
   },
+// NEW CODE (Replace with this)
 requestType: {
   type: String,
-  enum: ["5000", "10000"],
-  default: "5000"
+  default: "custom"
+},
+amount: {
+  type: Number,
+  required: true
+  // No enum restriction on amount anymore
 },
 // ✅ QR Update Request fields (add these)
   qrUpdateRequested: {
